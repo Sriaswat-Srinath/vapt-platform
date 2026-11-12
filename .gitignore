@@ -63,3 +63,6 @@ Thumbs.db
 *.log
 /tmp/
 scratch/
+
+# --- M1 lab runtime state (isolation results, daemon dirty flag, evidence) ---
+.lab-state/

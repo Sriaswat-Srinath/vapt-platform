@@ -30,7 +30,7 @@ isolation, including proving the proof can fail.
 | F1 | Juice Shop starts and serves HTTP 200 on its root inside the lab network | `docker compose exec` curl from a lab-attached container |
 | F2 | `shop.brakes-vapt.test` resolves **inside** `vapt_lab` to an address in `172.30.10.0/24` | `getent hosts` from a lab container; address asserted in-subnet |
 | F3 | ZAP daemon responds to `/JSON/core/view/version` **with** the API key, and **refuses without it** | both directions asserted |
-| F4 | The workstation reaches the app at `http://127.0.0.1:3000` | host-side curl |
+| F4 | The workstation reaches the app at `http://127.0.0.1:3000` | host-side curl — **via the opt-in loopback forwarder (deviation D19, see `M1_REPORT.md`)**: Docker does not publish ports from an `internal: true` network |
 | F5 | `shop.brakes-vapt.test` does **not** resolve on the host | host-side resolution must fail; no hosts-file entry is added |
 | F6 | `make lab-reset` returns Juice Shop to a clean state | marker record created, reset, marker absent |
 | F7 | `lab_subnet_check.sh` detects a conflicting subnet and refuses `lab-up` | run with a deliberately overlapping fixture |
@@ -39,7 +39,7 @@ isolation, including proving the proof can fail.
 
 | # | Criterion | Verification |
 |---|---|---|
-| I1 | `vapt_lab` is `internal: true` with no gateway route | `docker network inspect` + no default route in a lab container |
+| I1 | `vapt_lab` is `internal: true` with no gateway route | `docker network inspect` + no default route in **either** lab container, read from `/proc/net/route` (the images carry no `ip` binary; a probe error counts as failure) |
 | I2 | TCP egress from the **ZAP** container to each `ISOLATION_PROBE_TARGETS` entry fails | bounded-timeout connect attempts, all must fail |
 | I3 | TCP egress from the **Juice Shop** container fails identically | same probes |
 | I4 | Public DNS resolution fails from both containers | a public name must not resolve |

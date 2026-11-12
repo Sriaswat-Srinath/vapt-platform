@@ -1,0 +1,44 @@
+{
+  "_comment": [
+    "M1 seed fixture for the registered mock asset. Asset + scope rules ONLY.",
+    "No ScopeGrant is defined and none may be activated: the authorisation",
+    "document lab/authorisation/MOCK-WEB-001.md is an UNSIGNED DRAFT.",
+    "Scanner execution therefore remains denied. Loaded by M2's seeder."
+  ],
+  "asset": {
+    "asset_identifier": "MOCK-WEB-001",
+    "display_name": "OWASP Juice Shop (local synthetic lab)",
+    "hostname": "shop.brakes-vapt.test",
+    "protocol": "http",
+    "port": 3000,
+    "base_path": "/",
+    "environment": "mock_lab",
+    "criticality": 1,
+    "state": "registered",
+    "notes": "Deliberately vulnerable synthetic training application. Disposable. Contains no real data. Reachable only inside the vapt_lab network; never off-host."
+  },
+  "scope_rules": [
+    { "kind": "include", "host_pattern": "shop.brakes-vapt.test", "port": 3000,
+      "path_prefix": "/", "method_allowlist": ["GET", "HEAD", "POST"],
+      "reason": "Registered mock target surface" },
+    { "kind": "exclude", "host_pattern": "shop.brakes-vapt.test", "port": 3000,
+      "path_prefix": "/rest/user/logout", "method_allowlist": [],
+      "reason": "Session-destroying endpoint" },
+    { "kind": "exclude", "host_pattern": "shop.brakes-vapt.test", "port": 3000,
+      "path_prefix": "/api/Users", "method_allowlist": [],
+      "reason": "User mutation endpoints are out of scope for passive assessment" },
+    { "kind": "exclude", "host_pattern": "shop.brakes-vapt.test", "port": 3000,
+      "path_prefix": "/rest/user/reset-password", "method_allowlist": [],
+      "reason": "Credential-state mutation" },
+    { "kind": "exclude", "host_pattern": "shop.brakes-vapt.test", "port": 3000,
+      "path_prefix": "/ftp", "method_allowlist": [],
+      "reason": "Static file retrieval loop; no assessment value, wastes budget" }
+  ],
+  "scope_grant": null,
+  "authorisation_document": {
+    "path": "lab/authorisation/MOCK-WEB-001.md",
+    "document_state": "unsigned_draft",
+    "sha256": null,
+    "note": "Hash is recorded only after a human signs the document and an operator records verification. No code path sets signed_verified automatically."
+  }
+}

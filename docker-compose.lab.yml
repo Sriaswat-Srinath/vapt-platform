@@ -1,0 +1,133 @@
+# VAPT M1 — isolated local mock laboratory.
+#
+# Hard constraints (docs/SAFETY.md, docs/adr/ADR-0005, ADR-0008):
+#   * vapt_lab is `internal: true` — no route off-host for any container on it.
+#   * The ZAP API port is NOT published to the host or workstation network. Its
+#     API key is an additional control, never a substitute for isolation.
+#   * No Docker socket is mounted into any container, ever.
+#   * restart: "no" on ZAP — a crashed daemon must stay down rather than return
+#     with a deceptively clean session (ADR-0008 R3 §9).
+#   * Juice Shop is published on 127.0.0.1 only, never 0.0.0.0.
+name: vapt
+
+networks:
+  vapt_lab:
+    name: ${LAB_NETWORK_NAME:-vapt_lab}
+    driver: bridge
+    internal: true
+    ipam:
+      driver: default
+      config:
+        - subnet: ${LAB_SUBNET:-172.30.10.0/24}
+
+services:
+  juiceshop:
+    # MOCK-WEB-001 — deliberately vulnerable synthetic training application.
+    # Disposable. Contains no real data. Never reachable off-host.
+    image: bkimminich/juice-shop@sha256:9e437b456e444ff001d1663e4f6f05c796fe02f1058dd2651d6791a15b43dfeb
+    container_name: vapt_juiceshop
+    hostname: juiceshop
+    restart: "no"
+    init: true
+    networks:
+      vapt_lab:
+        ipv4_address: ${JUICESHOP_IP:-172.30.10.20}
+        aliases:
+          - ${MOCK_TARGET_HOSTNAME:-shop.brakes-vapt.test}
+    # NO `ports:` KEY — and not by choice. Docker SILENTLY IGNORES port
+    # publishing for a container attached only to an `internal: true` network
+    # (verified: PortBindings set, NetworkSettings.Ports null, no docker-proxy,
+    # nothing listening). Workstation access is therefore provided by an opt-in
+    # host-side loopback forwarder: `make lab-publish`. See docs/M1_REPORT.md
+    # deviation D19. Isolation is never traded for convenience here.
+    # No NODE_ENV=unsafe: that mode re-enables challenges Juice Shop disables in
+    # Docker for safety (file-write / DoS-class). The target stays hardened.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 1g
+    cpus: 1.5
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    healthcheck:
+      # The image is distroless: no shell, no `node` on PATH. The node binary
+      # lives at /nodejs/bin/node (image Entrypoint). Hardening benefit kept.
+      test: ["CMD", "/nodejs/bin/node", "-e", "require('http').get('http://127.0.0.1:3000/rest/admin/application-version',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+
+  zap:
+    image: ghcr.io/zaproxy/zaproxy@sha256:9624669db72f54d86c4b46a7064518bd9bf79d8c61a4c31befa9923489f328af
+    container_name: vapt_zap
+    hostname: zap
+    # Deliberate: a crashed daemon stays down. Recovery is an explicit operator
+    # action (make lab-zap-restart) followed by verification. See ADR-0008 R3 §11.
+    restart: "no"
+    init: true
+    networks:
+      vapt_lab:
+        ipv4_address: ${ZAP_IP:-172.30.10.10}
+    # NO `ports:` KEY. The ZAP API is reachable only from inside vapt_lab.
+    user: zap
+    working_dir: /home/zap
+    environment:
+      HOME: /home/zap
+    command:
+      - zap.sh
+      - -daemon
+      - -host
+      - 0.0.0.0
+      - -port
+      - "8080"
+      - -silent                      # no telemetry, no add-on update calls
+      - -nostdout
+      - -config
+      - api.key=${ZAP_API_KEY:?ZAP_API_KEY must be set}
+      # ZAP validates BOTH the client address and the Host header against
+      # api.addrs. addr(0)/addr(1) permit ZAP's own address and service name so
+      # the Host header check passes; addr(2) is the ONLY permitted client
+      # range — the worker range .3x. The bridge gateway 172.30.10.1 (i.e. the
+      # host/workstation) is deliberately absent, so the host is refused even
+      # with a valid API key. Verified: "Request ... from 172.30.10.1 not
+      # permitted" in zap.log.
+      - -config
+      - api.addrs.addr(0).name=${ZAP_IP:-172.30.10.10}
+      - -config
+      - api.addrs.addr(0).regex=false
+      - -config
+      - api.addrs.addr(1).name=zap
+      - -config
+      - api.addrs.addr(1).regex=false
+      - -config
+      - api.addrs.addr(2).name=${ZAP_API_CLIENT_ALLOWLIST:-172\.30\.10\.3[0-9]}
+      - -config
+      - api.addrs.addr(2).regex=true
+      - -config
+      - database.recoverylog=false
+      - -config
+      - connection.timeoutInSecs=15
+    read_only: true
+    tmpfs:
+      # mode/uid are explicit: a tmpfs with options defaults to root-owned 0755,
+      # which the non-root `zap` user cannot write (observed: "Unable to create
+      # home directory /home/zap/.ZAP/"). Still nosuid, still read-only rootfs.
+      - /home/zap:rw,nosuid,size=512m,uid=1000,gid=1000,mode=0770
+      - /tmp:rw,nosuid,size=128m,uid=1000,gid=1000,mode=0770
+      - /zap/wrk:rw,nosuid,size=64m,uid=1000,gid=1000,mode=0770
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    mem_limit: 2g
+    cpus: 2.0
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 5 bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080' || exit 1"]
+      interval: 10s
+      timeout: 6s
+      retries: 18
+      start_period: 30s

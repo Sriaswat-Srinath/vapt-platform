@@ -183,7 +183,11 @@ before M1.
   (verified free on this host, re-checked by `make lab-check`). Subnet membership is **not**
   authorisation — the exact registered host and port allowlist still applies.
 - The mock target publishes container port 3000 on **`127.0.0.1:3000` only**; a non-loopback publish
-  is refused at startup. `shop.brakes-vapt.test` stays a `vapt_lab` network alias with **no**
+  is refused at startup. *M1 finding:* Docker does not create port bindings for containers on an
+  `internal: true` network, so this is provided by an opt-in host-side loopback forwarder rather than
+  a compose `ports:` entry (deviation D19, `M1_REPORT.md`). *M1 finding:* `internal: true` does not
+  isolate containers from the host itself (D20) — the ZAP `api.addrs` allowlist is what denies the
+  workstation, and it is tested. `shop.brakes-vapt.test` stays a `vapt_lab` network alias with **no**
   workstation hosts-file entry; the workstation uses `http://127.0.0.1:3000`.
 - A new module `agent/redaction.py` sits on the only egress path to the LLM; agent tools return
   `RedactedText`, which only the redactor can construct (ADR-0010). Import-linter gains a contract

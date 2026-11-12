@@ -1,0 +1,23 @@
+# VAPT application stack.
+#
+# M1 declares the two non-lab networks only; services (api, worker, postgres,
+# redis, frontend) land in M2. The lab lives in docker-compose.lab.yml.
+#
+#   vapt_edge  — the ONLY network with egress, and only for the configured LLM
+#                provider. api + frontend attach here in M2.
+#   vapt_core  — internal: true. api, worker, postgres, redis in M2.
+#
+# The worker will be dual-homed vapt_core + vapt_lab and will hold no LLM
+# credentials (docs/ARCHITECTURE.md §2).
+name: vapt
+
+networks:
+  vapt_edge:
+    name: ${EDGE_NETWORK_NAME:-vapt_edge}
+    driver: bridge
+  vapt_core:
+    name: ${CORE_NETWORK_NAME:-vapt_core}
+    driver: bridge
+    internal: true
+
+services: {}

@@ -47,7 +47,7 @@ refuse to honour the flag when its preconditions are unmet.
 | `EDGE_NETWORK_NAME` | `vapt_edge` | only network with egress; `api` + `frontend` only |
 | `MOCK_TARGET_HOSTNAME` | `shop.brakes-vapt.test` | Docker network alias, resolvable **only** inside `vapt_lab`; no workstation hosts-file entry |
 | `MOCK_TARGET_PORT` | `3000` | container port |
-| `MOCK_TARGET_PUBLISH` | `127.0.0.1:3000` | **loopback-bound only**; never `0.0.0.0` |
+| `MOCK_TARGET_PUBLISH` | `127.0.0.1:3000` | **loopback-bound only**; never `0.0.0.0`. **M1 implementation note:** Docker silently ignores port publishing on an `internal: true` network, so this is realised by the opt-in host-side forwarder `make lab-publish` (`MOCK_TARGET_PUBLISH_PORT`), not by a compose `ports:` entry — deviation D19 in `M1_REPORT.md`, pending ratification |
 | `ZAP_API_KEY` | — (required when `ZAP_ADAPTER_ENABLED`) | from env, never committed |
 | `ZAP_BASE_URL` | `http://zap:8080` | `vapt_lab` only |
 | `ISOLATION_PROBE_TARGETS` | `1.1.1.1:443,8.8.8.8:53` | probes that **must fail**; plus a public DNS name that must not resolve |
