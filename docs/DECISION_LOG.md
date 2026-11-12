@@ -38,3 +38,40 @@ ADR-0004 CVSS separate from priority · ADR-0005 network egress denial primary �
 resolve-once-and-pin · ADR-0007 agent proposes, humans decide · **ADR-0008 per-job scanner
 isolation** · **ADR-0009 dual-control limits in a single-operator environment** · **ADR-0010 LLM
 evidence redaction** · **ADR-0011 evidence retention and access controls**.
+
+---
+
+## Round 2 clarifications — reviewed and accepted 2026-11-12
+
+ADR-0008…0011 were reviewed by the owner and accepted subject to the clarifications below. All are
+now binding and are reflected in the ADR amendments, the schema proposal (`DATA_MODEL.md` §11) and
+the new lifecycle documents.
+
+| Ref | Clarification | Where implemented |
+|---|---|---|
+| R2-1 | **Global** PostgreSQL advisory lock for the ZAP daemon — the per-asset lock is insufficient because `newSession` is a daemon-global operation that would corrupt a concurrent job on a *different* asset | ADR-0008 R2; `SCANNER_LIFECYCLE.md` §1–2 |
+| R2-2 | MVP: one active ZAP job globally; one context per job; global lease held across the **complete** session lifecycle; per-asset controls retained as a narrower budget control | ADR-0008 R2 §1–4; `ZAP_MAX_CONCURRENT_JOBS=1` clamped in code |
+| R2-3 | Any unconfirmed teardown marks the daemon dirty; dirty state blocks **all** subsequent scanner jobs until an audited admin reset | ADR-0008 R2 §5–7; new preflight **gate 13** |
+| R2-4 | No concurrent ZAP sessions until isolation is demonstrated by dedicated tests; raising the limit needs a superseding ADR, not a config change | ADR-0008 R2 §8; `SCANNER_LIFECYCLE.md` §6 |
+| R2-5 | Approvals are **invalidated** when an identity is revoked, deactivated or loses attestation; dependent in-flight jobs stop at the next phase boundary; invalidation is not reversed by re-activation | ADR-0009 R2 §7; `approval_state += invalidated`; `identity_events` |
+| R2-6 | Configuration cannot bypass startup verification: `DUAL_CONTROL_AVAILABLE` is an input, the effective value is **computed** at startup *and* at every gate 7 evaluation; no column, flag or field can set it directly | ADR-0009 R2 §8; `CONFIGURATION.md` §R2 |
+| R2-7 | Five-case identity test matrix; only two distinct, active, attested identities may satisfy the precondition, and **all other gates still apply** | ADR-0009 R2 §9 |
+| R2-8 | Redaction coverage across JSON (incl. nested arrays), URL query parameters, HTML forms, multipart, XML, exception messages, tool errors and stack traces, and recognisable encoded credentials | ADR-0010 R2 §9; `REDACTION_DATAFLOW.md` §7 |
+| R2-9 | **Keyed HMAC identifiers** for secret-value correlation, replacing plain SHA-256 prefixes (which were brute-forceable for low-entropy secrets and therefore leaked the value) | ADR-0010 R2 §7 |
+| R2-10 | Content-integrity hashes preserved **separately** and never placed in an LLM-bound payload | ADR-0010 R2 §8; `REDACTION_DATAFLOW.md` §4 |
+| R2-11 | The agent must have no direct **or indirect** path to raw evidence — ten paths enumerated and each closed with a test | ADR-0010 R2 §10 |
+| R2-12 | Before retention is implemented: reference-aware blob deletion, interrupted-purge recovery, report pinning semantics, raw restoration policy, encryption-at-rest assumptions and limits | ADR-0011 R2 §7–11; `EVIDENCE_LIFECYCLE.md` |
+| R2-13 | A blob must not be deleted while any active evidence reference requires it | ADR-0011 R2 §7; three independent guards (FK, `FOR UPDATE` + in-transaction recount, post-unlink assertion) |
+| R2-14 | `MOCK-WEB-001.md` is an unsigned draft: do not sign it, do not modify its signature fields, do not auto-activate a ScopeGrant; **scanner execution remains denied until it is signed and verified** | `scope_grants.document_state` + CHECK `state<>'active' OR document_state='signed_verified'` (`DATA_MODEL.md` §11.4); gate 5 re-verifies; the file is untouched since its unsigned commit |
+| R2-15 | `CONFIGURATION.md` is the configuration baseline and `SECURITY_ASSUMPTIONS.md` the security/residual-risk baseline; safety defaults are not to be changed silently | both carry an R2 baseline notice; any change requires an approved ADR |
+
+### Consequences accepted with these clarifications
+- **Throughput:** one ZAP job at a time platform-wide; queue depth is visible in the UI.
+- **Availability:** a crashed worker requires an audited admin scanner reset rather than
+  auto-recovery, because unverified daemon state must not be trusted.
+- **Correlation:** rotating `REDACTION_HMAC_KEY` ends correlation with pre-rotation refs; retaining
+  correlation across rotation would require keeping the secrets, which is refused.
+- **Reports do not extend secret lifetime:** `pins_blob` defaults to false, so report generation pins
+  redacted evidence only.
+- **Purge is final:** no restoration capability exists in the MVP; the request flow exists so that
+  any future restoration is controlled, verified and audited rather than ad hoc.

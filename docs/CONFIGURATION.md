@@ -1,5 +1,9 @@
 # Configuration Reference (final, pre-M1)
 
+> **Baseline notice (R2, 2026-11-12).** This file is the approved configuration baseline. Safety
+> defaults in it are not to be changed silently; a change requires an approved ADR. Section R2 at the
+> end carries the settings added by the round-2 clarifications.
+
 All settings come from the environment via `pydantic-settings`, validated at startup with fail-fast
 errors. `.env.example` is committed with placeholder values; `.env*` (except `.env.example`) is
 git-ignored. **No secret, provider name, model id or credential is hardcoded anywhere in the
@@ -108,3 +112,91 @@ subnet, and gates 9–10 additionally require the exact registered host and port
 6. `LLM_ENABLED=true` without `LLM_PROVIDER`, `LLM_MODEL` and a resolvable key env var ⇒ refuse to
    start (rather than silently disabling the agent).
 7. `MOCK_TARGET_PUBLISH` not loopback-bound ⇒ refuse to start.
+
+---
+
+## R2 additions (2026-11-12)
+
+### Scanner daemon serialisation (ADR-0008 R2)
+
+| Variable | Default | Notes |
+|---|---|---|
+| `ZAP_MAX_CONCURRENT_JOBS` | `1` | **clamped in code**: any value > 1 is rejected at startup, not silently honoured. Raising it requires a superseding ADR |
+| `ZAP_DAEMON_LOCK_KEY` | `vapt:zap:daemon` | global advisory-lock key; held across the complete session lifecycle |
+| `ZAP_LEASE_HEARTBEAT_SECONDS` | `10` | lease liveness |
+| `ZAP_LEASE_STALE_SECONDS` | `60` | a lease older than this with no held advisory lock ⇒ teardown unproven ⇒ **daemon dirty** |
+| `ZAP_TEARDOWN_IDLE_POLL_SECONDS` / `ZAP_TEARDOWN_IDLE_TIMEOUT_SECONDS` | `2` / `60` | confirm-idle bounds; timeout ⇒ dirty |
+| `SCANNER_DIRTY_BLOCKS_ALL_ADAPTERS` | `false` | dirty state always blocks the affected adapter on every asset; `true` additionally blocks other adapters |
+
+There is **no** setting that clears a dirty daemon. Recovery is `POST /system/scanner/reset` (admin,
+audited) only.
+
+### Dual control (ADR-0009 R2)
+
+| Variable | Default | Notes |
+|---|---|---|
+| `DUAL_CONTROL_AVAILABLE` | `false` | an **input**, never the effective value. Effective = flag AND ≥2 attested, distinct, active identities, recomputed at startup **and at every gate 7 evaluation** |
+| `DUAL_CONTROL_MIN_IDENTITIES` | `2` | floor-clamped at 2; a lower value is rejected at startup |
+| `APPROVAL_INVALIDATION_ON_IDENTITY_CHANGE` | `true` | **not disableable**; present for documentation and assertion only — a `false` value is rejected at startup |
+
+No environment variable, column, API field or profile setting can set the effective dual-control
+value directly or skip its recomputation.
+
+### Authorisation document (owner instruction R2-14)
+
+| Variable | Default | Notes |
+|---|---|---|
+| `AUTHORISATION_DOC_ROOT` | `lab/authorisation` | documents are read, hashed and verified from here |
+| `REQUIRE_SIGNED_AUTHORISATION` | `true` | **not disableable**; a `false` value is rejected at startup |
+
+A grant cannot reach `active` unless `document_state='signed_verified'` (DB CHECK), and gate 5
+re-verifies the SHA-256 and the signed state on every evaluation. No code path sets `signed_verified`
+automatically; it requires a human action recorded with actor and timestamp. **Until the operator
+signs `lab/authorisation/MOCK-WEB-001.md` and records verification, scanner execution is denied.**
+
+### Redaction (ADR-0010 R2)
+
+| Variable | Default | Notes |
+|---|---|---|
+| `REDACTION_HMAC_KEY_ENV` | `REDACTION_HMAC_KEY` | *name* of the env var holding the key, so the key never appears in a config dump |
+| `REDACTION_KEY_ID` | `v1` | recorded per tool call; rotation mints a new id and ends correlation with older refs |
+| `REDACTION_REF_LENGTH` | `12` | base32 chars of the HMAC retained |
+| `REDACTION_MAX_DECODE_PASSES` | `2` | decode-then-scan depth for encoded credentials |
+| `REDACTION_MAX_PARSE_DEPTH` / `REDACTION_MAX_PARSE_NODES` / `REDACTION_MAX_PARSE_BYTES` | `20` / `50000` / `2097152` | parser resource limits; exceeding them ⇒ whole-value redaction, never passthrough |
+| `REDACTION_STRICT` | `true` | retained from the baseline; **not disableable** — a `false` value is rejected at startup |
+| `LLM_EXPOSE_CONTENT_HASHES` | `false` | **not disableable**; plain SHA-256 values are never placed in an LLM-bound payload |
+
+`REDACTION_HMAC_KEY` is required whenever `LLM_ENABLED=true`; startup fails if it is absent, shorter
+than 32 bytes, or equal to a known example value. It is never logged, never audited, never persisted
+to the database and never sent to the provider.
+
+### Evidence retention (ADR-0011 R2)
+
+| Variable | Default | Notes |
+|---|---|---|
+| `RETENTION_ENABLED` | `false` | retention stays off until the five mechanisms in `EVIDENCE_LIFECYCLE.md` are implemented and tested |
+| `RETENTION_SCHEDULE_CRON` | `0 3 * * *` | |
+| `RETENTION_DRY_RUN` | `true` | first-run default: plan and report, delete nothing |
+| `RETENTION_MAX_ITEMS_PER_RUN` | `5000` | bounds blast radius |
+| `RETENTION_ITEM_MAX_ATTEMPTS` | `2` | then `failed` + reported; the run completes without it |
+| `RETENTION_AUTO_RESUME_INTERRUPTED` | `true` | a half-finished purge is not a state to sit in; resumption is audited |
+| `RETENTION_PIN_BLOBS_FOR_REPORTS` | `false` | reports pin redacted evidence only, so report generation does not extend secret lifetime |
+| `EVIDENCE_ENCRYPTION_MODE` | `none` | the only accepted MVP value; reported verbatim by `/system/capabilities` as `none (host FDE assumed, unverified)` |
+| `RAW_RESTORATION_ENABLED` | `false` | the request flow exists; the MVP has no restoration capability (purge is final) |
+| `ORPHAN_SWEEP_ENABLED` | `true` | reports only; never deletes autonomously |
+
+`RETENTION_AUDIT_DAYS` remains absent by design — audit is never pruned.
+
+### Startup validations added this round
+
+8. `ZAP_MAX_CONCURRENT_JOBS > 1` ⇒ refuse to start.
+9. `DUAL_CONTROL_MIN_IDENTITIES < 2`, `APPROVAL_INVALIDATION_ON_IDENTITY_CHANGE=false`,
+   `REQUIRE_SIGNED_AUTHORISATION=false`, `REDACTION_STRICT=false`,
+   `LLM_EXPOSE_CONTENT_HASHES=true` or `EVIDENCE_ENCRYPTION_MODE != none` ⇒ refuse to start.
+   These are the safety defaults that configuration may not weaken.
+10. `LLM_ENABLED=true` without a valid `REDACTION_HMAC_KEY` (≥32 bytes, not an example value) ⇒
+    refuse to start.
+11. `RETENTION_ENABLED=true` while any of the five lifecycle mechanisms is absent (feature probe) ⇒
+    refuse to start.
+12. Any `scope_grants` row in `active` whose `document_state != 'signed_verified'` ⇒ refuse to start
+    (indicates out-of-band tampering with the grant table).

@@ -15,6 +15,8 @@ architecture, dependencies, risks, roadmap, data flow, open decisions.
 **Acceptance:** you approve the design and the open decisions in `OPEN_DECISIONS.md`.
 
 ## M1 — Local mock website lab
+
+> Full criteria: **[M1_ACCEPTANCE.md](M1_ACCEPTANCE.md)** (authoritative). Summary below.
 - `docker-compose.lab.yml`: Juice Shop + ZAP on an `internal: true` `lab` network, digest-pinned,
   network alias `shop.brakes-vapt.test`, non-root/read-only/cap-dropped scanner, no docker socket.
 - `scripts/lab_isolation_check.sh` + `make lab-up`, `lab-check`, `lab-reset`.

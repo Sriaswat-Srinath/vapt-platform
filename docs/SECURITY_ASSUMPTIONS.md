@@ -1,5 +1,9 @@
 # Security Assumptions and Residual Risk (final, pre-M1 review)
 
+> **Baseline notice (R2, 2026-11-12).** This file is the approved security-assumptions and
+> residual-risk baseline. Nothing in it is to be weakened silently; a change requires an approved
+> ADR. Section F carries the round-2 additions.
+
 What the platform's safety claims depend on. Anything here that proves false invalidates a control,
 so each assumption names its verification and what breaks if it fails.
 
@@ -68,3 +72,43 @@ These assumptions, the approved decisions (`DECISION_LOG.md`) and ADR-0001…001
 implementation would weaken any control or a decision proves technically infeasible, work stops and
 the trade-off is presented for approval before anything changes (`CLAUDE.md` rule 16). No silent
 substitutions.
+
+---
+
+## F. R2 additions (2026-11-12)
+
+### F.1 New mechanically verified assumptions
+
+| # | Assumption | Verified by | If false |
+|---|---|---|---|
+| A11 | At most one ZAP job touches the daemon at a time | global advisory lock + partial unique index (one `held` lease per adapter) + a concurrent-submission test asserting the lease timeline | second job stays `queued`; `newSession` cannot run under another job |
+| A12 | Unproven daemon state is never trusted | stale/unheld lease ⇒ daemon dirty; dirty blocks every job at gate 13; only an audited admin reset clears it | scanning stops platform-wide — the safe direction |
+| A13 | Intrusive authority cannot be granted by configuration | effective dual control is computed at startup **and** at every gate 7 evaluation; five-case test matrix; forbidden config values refused at startup | flag forced false, audited; intrusive stays denied |
+| A14 | An approval does not outlive its identities' qualification | eager invalidation on revoke/deactivate/unattest + live re-evaluation; in-flight jobs cancelled at the next phase boundary | approval `invalidated`; job stops with `approval_invalidated` |
+| A15 | No plain hash of a secret value is ever exposed | keyed HMAC refs only; `LLM_EXPOSE_CONTENT_HASHES=false` not disableable; canary sweep over every tool result, prompt and error | CI fails; merge blocked |
+| A16 | A blob is never unlinked while an active reference exists | FK + `SELECT … FOR UPDATE` with an in-transaction recount + post-unlink assertion; shared-blob and concurrent-reference tests | deletion skipped as `skipped_referenced`; no dangling reference |
+| A17 | An interrupted purge resolves to a known state | plan committed before any destructive step; idempotent per-item steps; unlink-before-row-null so the failure mode is "file gone, row stale" (repairable) not "row purged, secret on disk" (silent failure); startup reconciler | reconciler completes or fails the item, audited |
+| A18 | Scanner execution is denied while the authorisation document is an unsigned draft | DB CHECK (`state<>'active' OR document_state='signed_verified'`) + gate 5 re-verification + startup check for tampered grant rows | grant cannot activate; every scan denied |
+
+### F.2 New assumption trusted by necessity
+
+| # | Assumption | Residual risk | Containment |
+|---|---|---|---|
+| B7 | **Host full-disk encryption protects evidence at rest** | **The platform does not implement application-level encryption and does not verify FDE.** On a running host, FDE gives no confidentiality against root, container escape, a process that can read the volume, backup copies, misconfigured bind mounts, process memory, or database dumps. `SECRET_KEY`, `POSTGRES_PASSWORD`, `ZAP_API_KEY`, `REDACTION_HMAC_KEY` and the LLM key share this exposure | `EVIDENCE_ENCRYPTION_MODE=none` is reported verbatim by `/system/capabilities` and in every report's Limitations; blobs are `0600`, non-root-owned, never mounted into a scanner container; **MVP evidence is synthetic only**, which is why deferral is acceptable; envelope encryption + key management required before any non-synthetic data (open decision **D13**) |
+
+### F.3 Additions to the accepted limitations (§C)
+
+11. **One ZAP job at a time, platform-wide.** Queued jobs wait; this is a deliberate isolation
+    trade, not a defect.
+12. **A crashed scanner worker requires an audited admin reset**, because the previous job's teardown
+    is unproven and daemon state is therefore untrusted. No auto-recovery.
+13. **Purge is final.** No restoration capability exists in the MVP; the controlled request flow
+    exists only so that any future restoration from an operator-managed backup is verified and
+    audited rather than ad hoc.
+14. **Report generation does not extend the life of unredacted evidence** (`pins_blob=false`), so a
+    long-lived report pins redacted text only.
+15. **Rotating `REDACTION_HMAC_KEY` ends correlation with pre-rotation refs.** Preserving it would
+    require retaining the secrets, which is refused.
+16. **Evidence is not encrypted at application level** (B7 above), stated in every report.
+17. **Scanner execution is currently denied in this repository**, because
+    `lab/authorisation/MOCK-WEB-001.md` is an unsigned draft and no grant can be activated from it.

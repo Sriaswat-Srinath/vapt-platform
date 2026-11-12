@@ -20,7 +20,11 @@ Read `CLAUDE.md` for the engineering rules, then the design set in `docs/`:
 | [docs/DECISION_LOG.md](docs/DECISION_LOG.md) | **binding** decisions D1–D12 as approved, with modifications |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | every setting, its default and its startup validation |
 | [docs/SECURITY_ASSUMPTIONS.md](docs/SECURITY_ASSUMPTIONS.md) | what the safety claims depend on, residual risk, accepted limitations |
-| [docs/adr/](docs/adr/README.md) | ADR-0001 … ADR-0011 |
+| [docs/SCANNER_LIFECYCLE.md](docs/SCANNER_LIFECYCLE.md) | ZAP locks, job states, teardown, dirty-daemon recovery |
+| [docs/REDACTION_DATAFLOW.md](docs/REDACTION_DATAFLOW.md) | what reaches the LLM, and how it is redacted |
+| [docs/EVIDENCE_LIFECYCLE.md](docs/EVIDENCE_LIFECYCLE.md) | capture → storage → access → pin → purge |
+| [docs/M1_ACCEPTANCE.md](docs/M1_ACCEPTANCE.md) | M1 scope and acceptance criteria |
+| [docs/adr/](docs/adr/README.md) | ADR-0001 … ADR-0011 (0008–0011 amended R2) |
 | [docs/OPEN_DECISIONS.md](docs/OPEN_DECISIONS.md) | superseded; retained for history |
 
 ## Hard boundaries
@@ -37,6 +41,10 @@ Read `CLAUDE.md` for the engineering rules, then the design set in `docs/`:
   and holds no LLM credentials (ADR-0010).
 - The LLM may only call allowlisted read tools and may propose, never decide. It cannot set validation
   status, CVSS, risk scores, scope or rate limits, and cannot run commands.
+- One ZAP job runs at a time platform-wide, under a global daemon lease; unproven teardown marks the
+  daemon dirty and blocks all scanner jobs until an audited admin reset (ADR-0008 R2).
+- Scanner execution is **currently denied**: `lab/authorisation/MOCK-WEB-001.md` is an unsigned draft,
+  and no ScopeGrant can be activated from it.
 - Evidence: synthetic only in the MVP, stored in a volume-backed blob store, unredacted content
   reachable only by `admin` with a justification and an audit entry (ADR-0011).
 - No DoS, destructive tests, brute force, persistence, credential theft, exfiltration or

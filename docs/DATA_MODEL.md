@@ -334,3 +334,136 @@ Already append-only; the amendment is an explicit constraint that no row is ever
 (app DB role lacks UPDATE/DELETE on the table, as with `audit_log`), so a human override always
 coexists with the original automated result rather than replacing it. Added columns:
 `justification` (NOT NULL when `actor_kind='human'`), `actor_token_id`.
+
+---
+
+## 11. Schema proposal R2 (2026-11-12) — clarifications round 2
+
+Changes required by the R2 amendments to ADR-0008…0011. Everything here is additive to §1–§10 except
+the two replacements marked **REPLACES**.
+
+### 11.1 New enum values and enums
+```
+approval_state      += invalidated
+blob_state           : present | pending_delete | purged | missing
+retention_run_state  : planned | running | interrupted | completed | failed
+retention_item_state : planned | unlinked | row_nulled | done
+                     | skipped_pinned | skipped_referenced | failed
+lease_state          : held | released | abandoned
+restoration_state    : requested | approved | rejected | restored | unavailable
+grant_document_state : unsigned_draft | signed_verified | mismatched | missing
+```
+
+### 11.2 Scanner daemon serialisation (ADR-0008 R2)
+```
+scanner_daemon_leases(id, adapter_name, lease_state lease_state,
+                      job_id FK scan_jobs NULL, holder_worker_id, holder_pid,
+                      acquired_at, heartbeat_at, expires_at,
+                      released_at, abandoned_reason,
+                      daemon_dirty_on_release bool default false)
+  -- partial unique index: one `held` lease per adapter_name
+  CREATE UNIQUE INDEX ON scanner_daemon_leases(adapter_name) WHERE lease_state='held';
+
+scanner_daemon_state(adapter_name PK, is_dirty bool default false,
+                     dirty_reason, dirty_since, dirty_job_id FK NULL,
+                     last_reset_at, last_reset_by FK analysts)
+```
+The advisory lock `vapt:zap:daemon` is the mutex; these rows make ownership observable and survive a
+crash for forensics. `scan_jobs` additionally gains:
+```
+scan_jobs += daemon_lease_id FK NULL, session_asserted_empty_at, teardown_confirmed_at,
+             requires_exclusive_daemon bool
+```
+
+### 11.3 Dual control (ADR-0009 R2)
+```
+operator_identities += deactivated_at, attestation_withdrawn_at, attestation_withdrawn_by FK
+
+approvals += invalidated_at, invalidated_reason,
+             invalidating_identity_id FK operator_identities NULL
+  -- state 'invalidated' is terminal; re-activating an identity does NOT restore authority
+
+identity_events(id, operator_identity_id FK, at, event
+                enum[registered|attested|attestation_withdrawn|deactivated|reactivated|revoked],
+                actor_id FK analysts, reason, affected_approval_ids uuid[])
+```
+`approvals.independence_verified` remains as **evidence of what was true at decision time**; it is
+never read as current authority. Gate 7 recomputes live from `operator_identities`.
+
+### 11.4 Authorisation-document verification (owner instruction, this round)
+```
+scope_grants += document_state grant_document_state default 'unsigned_draft',
+                document_verified_at, document_verified_by FK analysts,
+                document_signature_note
+  CHECK (state <> 'active' OR document_state = 'signed_verified')
+```
+A grant **cannot be activated** while its authorisation document is an unsigned draft, and preflight
+gate 5 re-verifies `document_sha256` plus `document_state='signed_verified'` on every evaluation. The
+committed `lab/authorisation/MOCK-WEB-001.md` is therefore inert until a human signs it and an
+operator records the verification: **scanner execution stays denied**. No code path sets
+`signed_verified` automatically.
+
+### 11.5 Evidence blobs — reference-aware deletion (ADR-0011 R2 §7)
+```
+evidence_blobs(id, content_sha256 unique, byte_size, media_type,
+               storage_path, state blob_state default 'present',
+               created_at, last_verified_at, purged_at,
+               purge_run_id FK retention_runs NULL)
+
+evidence += blob_id FK evidence_blobs NULL      -- **REPLACES** evidence.blob_path
+            redacted_sha256, access_tier, blob_purged_at, purge_policy_version
+```
+`report_artifacts.blob_path` is likewise **REPLACED** by `artifact_blob_id FK evidence_blobs`, so
+artifacts participate in the same reference accounting. Active reference counts are always computed
+by query under `SELECT … FOR UPDATE` on the blob row — never cached.
+
+### 11.6 Retention runs and resumability (ADR-0011 R2 §8)
+```
+retention_runs(id, policy_version, state retention_run_state,
+               planned_at, started_at, finished_at,
+               lease_holder, heartbeat_at,
+               counts jsonb, actor_kind, actor_id, error)
+
+retention_run_items(id, run_id FK, target_kind enum[blob|evidence_row|raw_observation],
+                    target_id uuid, state retention_item_state default 'planned',
+                    attempts int default 0, attempted_at, completed_at, error,
+                    UNIQUE(run_id, target_kind, target_id))
+```
+The plan is committed before any destructive step; steps are idempotent and keyed by item, so
+resumption is safe. An item failing twice ⇒ `failed`, reported, run completes without it.
+
+### 11.7 Report evidence pinning (ADR-0011 R2 §9)
+```
+evidence_pins(id, report_id FK, report_artifact_id FK, evidence_id FK,
+              pins_blob bool default false,          -- default: reports pin redacted text only
+              created_at, released_at, release_reason, released_by FK NULL,
+              UNIQUE(report_artifact_id, evidence_id))
+```
+
+### 11.8 Raw evidence restoration (ADR-0011 R2 §10)
+```
+raw_restoration_requests(id, evidence_id FK, state restoration_state,
+                         requested_by FK, justification NOT NULL, requested_at,
+                         decided_by FK NULL, decided_at, decision_note,
+                         restored_at, verified_sha256_match bool NULL, note)
+  CHECK (decided_by IS NULL OR decided_by <> requested_by)
+```
+
+### 11.9 Redaction provenance (ADR-0010 R2)
+```
+agent_tool_calls += redaction_key_id, redaction_report jsonb
+  -- result_sha256 is the hash of the REDACTED payload only
+```
+No column anywhere stores a plain SHA-256 of an isolated secret value, and no LLM-bound payload
+carries `content_sha256`, `payload_sha256`, `request_sha256` or `response_sha256`. Correlation uses
+keyed HMAC refs computed in memory from `REDACTION_HMAC_KEY`; **the key is never persisted in the
+database.**
+
+### 11.10 Migration notes
+- `evidence.blob_path` → `evidence.blob_id` and `report_artifacts.blob_path` → `artifact_blob_id` are
+  pre-M6 schema changes, so no production data migration is implied; they land in the M2/M6 baselines
+  directly rather than as a later rewrite.
+- `approval_state` gains `invalidated`; `blob_state`, `retention_*`, `lease_state`,
+  `restoration_state` and `grant_document_state` are new native enums created in the M3/M6 migrations.
+- The `scope_grants` CHECK and the partial unique index on `scanner_daemon_leases` are the two
+  database-level enforcement points added this round; both are covered by migration tests.

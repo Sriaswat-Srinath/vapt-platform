@@ -134,14 +134,20 @@ its own. Gate 9 still requires the exact registered port, and gate 10 the exact 
 path/method allowlist. A second, unregistered container inside the lab subnet is **out of scope** and
 any finding about it is rejected and audited.
 
-### 7.3 Per-job scanner isolation (D4, ADR-0008)
+### 7.3 Per-job scanner isolation (D4, ADR-0008 + R2)
 
-Each job: `newSession` → assert empty alert/site/message stores → create context `job-<job_id>` with
+**One active ZAP job globally**, serialised by a **global** daemon lease
+(`pg_advisory_lock('vapt:zap:daemon')` + a `scanner_daemon_leases` row with heartbeat) held across the
+complete session lifecycle — the per-asset lock cannot serialise `newSession`, which is a
+daemon-global operation. Per-asset locks and job caps are retained as narrower budget controls. A new
+**gate 13 `scanner_daemon_available`** denies when the daemon is dirty, a live lease is held, or a
+stale lease is unreconciled. Each job: `newSession` → assert empty alert/site/message stores → create context `job-<job_id>` with
 include/exclude regexes → run → `finally`: `stopScan` → confirm idle → `removeContext` →
 `newSession` → assert empty. Teardown failure ⇒ job `failed` with
 `stop_reason='teardown_unconfirmed'` **and** a daemon-dirty flag that blocks new jobs until an admin
-runs `POST /system/scanner/reset`. Per-asset serialisation via a Postgres advisory lock prevents two
-jobs sharing a session. Adapter handles persist in `scan_jobs.adapter_handle` so a worker restart
+runs `POST /system/scanner/reset` — blocking **every** asset and profile, not just the affected one.
+A stale or unheld lease found by the next acquirer also marks the daemon dirty, because the previous
+teardown is unproven and daemon state is therefore untrusted. Adapter handles persist in `scan_jobs.adapter_handle` so a worker restart
 re-attaches or fails explicitly rather than orphaning daemon state.
 
 ### 7.4 LLM redaction boundary (D3, ADR-0010)
@@ -150,10 +156,13 @@ re-attaches or fails explicitly rather than orphaning daemon state.
 text. Agent tools return `RedactedText`, constructible only by `agent/redaction.py`; import-linter
 forbids `agent/` from importing blob or raw-evidence readers. Two independent redaction stages (on
 write, and again on egress) cover credentials, cookies, bearer tokens, CSRF tokens, API keys,
-JWT/PEM/high-entropy strings and personal-data patterns, replacing values with
-`<redacted:kind=…,len=…,sha256=…>`. A redactor failure yields an empty result plus a tool error, never
-raw text. `redaction_version` and a per-call `redaction_report` are persisted, so what crossed the
-boundary is reconstructible.
+JWT/PEM/high-entropy strings and personal-data patterns. Redaction is **structure-aware** (JSON incl.
+nested arrays, URL query parameters, HTML forms, multipart, XML, exception messages, tool errors and
+stack traces, and recognisable encoded credentials), replacing values with
+`<redacted:kind=…,len=…,ref=hmac:v1:…>` — a **keyed** HMAC reference, never a plain digest of the
+secret (ADR-0010 R2 §7). Plain content hashes never cross the boundary. A redactor failure yields an
+empty result plus a tool error, never raw text. `redaction_version`, `redaction_key_id` and a
+per-call `redaction_report` are persisted, so what crossed the boundary is reconstructible.
 
 ### 7.5 Analyst override preserves the automated result (D10)
 
