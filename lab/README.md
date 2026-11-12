@@ -84,6 +84,25 @@ Three independent controls protect the ZAP API: it is not published; ZAP's own
 host — is deliberately excluded); and the API key is required. The key is an **additional** control,
 never a substitute for network isolation.
 
+## ZAP writable paths under `read_only: true` (D22)
+
+| Path | Needed for | Flags |
+|---|---|---|
+| `/home/zap` | `.ZAP/` home: config, session DB, add-on state, root CA, Java prefs | tmpfs 512 MiB, `nosuid`, uid 1000, `0770` |
+| `/tmp` | JVM temp; **native libraries are mapped from here, so it must be executable** | tmpfs 128 MiB, `nosuid`, **no `noexec`** |
+| `/zap/wrk` | ZAP working dir (reports/session exports) | tmpfs 64 MiB, `nosuid`, uid 1000 |
+
+A tmpfs declared with options is root-owned `0755` by default; without explicit `uid/gid/mode` ZAP
+cannot create its home directory. `noexec` on `/tmp` was removed because the JVM requires it; the
+container remains non-root, `cap_drop: ALL`, `no-new-privileges`, read-only elsewhere, no egress.
+
+## What `internal: true` does and does not isolate (D20)
+
+Containers cannot reach the internet or the LAN (`ENETUNREACH`). The **host** can reach containers,
+and containers can reach host services bound on `0.0.0.0` via the lab gateway `172.30.10.1`. So:
+never publish anything on `0.0.0.0` (probe `I14`), and keep unrelated host services off `0.0.0.0`
+(`I14b` lists them). Full matrix: `docs/SECURITY_ASSUMPTIONS.md` §H.
+
 ## Recovery
 
 ### ZAP crashed or is unreachable
@@ -108,11 +127,13 @@ the dirty flag clears.** There is no force flag, no override and no automatic ex
 health or identity sets `requires_operator_restart`, which means the container restart above is
 needed first.
 
-**Identity after a restart.** A restarted daemon has lost its instance marker. The identity step
-treats that as *untrusted* unless the restart was operator-authorised: `make lab-zap-restart` records
-a one-shot acknowledgement bound to the container's new start time, and the next `zap-reset` consumes
-it. A restart performed any other way (a crash, a raw `docker restart`) fails identity and keeps the
-daemon dirty — restarting the container can never launder dirty state. Every transition is appended
+**Identity after a restart (D23).** A restarted daemon has lost its instance marker. The identity
+step treats that as *untrusted* unless the restart was operator-authorised: `make lab-zap-restart`
+issues an acknowledgement bound to the container id, its start time, a fresh daemon instance UUID, a
+nonce, the operator identity and issue/expiry timestamps (TTL 600 s). It is single-use, consumed
+atomically by the next `zap-reset`, invalidated on any mismatch or expiry, invalidated if it turns out
+not to be needed, and **never clears the dirty flag by itself**. A restart performed any other way (a
+crash, a raw `docker restart`) fails identity and keeps the daemon dirty. Every transition is appended
 to `.lab-state/zap-daemon-audit.log`.
 
 In M1 this is a script-level reference implementation (`scripts/zap_daemon_state.sh`, state in the

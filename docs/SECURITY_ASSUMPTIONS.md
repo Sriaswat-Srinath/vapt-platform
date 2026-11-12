@@ -11,7 +11,7 @@ so each assumption names its verification and what breaks if it fails.
 
 | # | Assumption | Verified by | If false |
 |---|---|---|---|
-| A1 | `vapt_lab` and `vapt_core` have no route off-host | `make lab-check` / `POST /system/isolation/verify`: TCP probes to fixed public IPs and a public DNS lookup must all fail, from inside the ZAP container | gate 2 denies every scan; scanning stays disabled |
+| A1 | `vapt_lab` and `vapt_core` have no route off-host — **container→internet and container→LAN only; not host isolation (see §H)** | `make lab-check` / `POST /system/isolation/verify`: TCP probes to fixed public IPs and a public DNS lookup must all fail, from inside the ZAP container | gate 2 denies every scan; scanning stays disabled |
 | A2 | `shop.brakes-vapt.test` resolves only inside `vapt_lab`, to a lab-subnet address | isolation probe + `asset_resolutions` history | gate 8 denies: resolution outside `allowed_cidrs` |
 | A3 | No Docker socket is visible to a scanner container | isolation probe asserts absence of the bind | check fails ⇒ scanning disabled |
 | A4 | The mock target is published on loopback only | startup validation rejects non-loopback `MOCK_TARGET_PUBLISH` | app refuses to start |
@@ -147,3 +147,43 @@ substitutions.
 21. **A halted retention state blocks all further deletion** until an admin acknowledges — evidence
     may therefore persist beyond its retention window while an inconsistency is unresolved. Chosen
     deliberately over continuing to delete past an unexplained state.
+
+
+---
+
+## H. After M1 (2026-11-12) — measured reachability and ratified deviations
+
+### H.1 Reachability classes (do not conflate)
+
+| Class | Measured | Protection relied upon |
+|---|---|---|
+| container → internet | `ENETUNREACH` (blocked) | no default route + forwarded-traffic isolation (A1, I4) |
+| container → LAN / LAN gateway | `ENETUNREACH` (blocked) | same |
+| container → host via host LAN IP / `docker0` | `ENETUNREACH` (blocked) | no route |
+| **container → host via lab gateway `172.30.10.1`** | **reachable** for host services bound on `0.0.0.0` | **operator hygiene + probes `I14`/`I14b`**; scope gates never allow the gateway as a target |
+| container → container (same lab) | reachable | ZAP `api.addrs` allowlist + key; target is disposable |
+| container → other Docker network | blocked | no route |
+| **host → container** | **reachable** on container IPs | ZAP `api.addrs` excludes the host (`I9c`); the target is synthetic |
+| LAN peer → container | not without host routing | loopback-only publishes (`I14`); `ip_forward=1` on this host is noted |
+
+**`internal: true` is never described as complete host isolation.**
+
+### H.2 New verified assumptions
+
+| # | Assumption | Verified by | If false |
+|---|---|---|---|
+| A26 | No VAPT component is published on `0.0.0.0` | probe `I14`; host-wide `0.0.0.0` listeners reported by `I14b` | isolation check fails |
+| A27 | The workstation forwarder relays only to the registered target | fixed destination with refusal of every other address class; proxy-abuse test; established-peer check | forwarder refuses to start / test fails |
+| A28 | A restart acknowledgement cannot clear dirty state or be reused | consulted only by R3; single-use, atomic, TTL, identity-bound; tamper matrix tests | reset fails at R3; flag retained |
+| A29 | ZAP's writable surface is three size-capped, `nosuid`, uid-owned tmpfs paths | container inspect + `read_only: true` probe `I6b` | — |
+
+### H.3 New assumption trusted by necessity
+
+| # | Assumption | Residual risk | Containment |
+|---|---|---|---|
+| B10 | The host operator does not bind unrelated services on `0.0.0.0` | lab containers (and thus a compromised scanner) could reach such a service via the gateway | `I14b` reports every such listener on each check; the lab target is synthetic; scope gates refuse the gateway IP as a target |
+
+### H.4 Additions to the accepted limitations (§C)
+22. `internal: true` provides no host isolation; see H.1.
+23. `/tmp` in the ZAP container is executable (JVM requirement), on a size-capped `nosuid` tmpfs.
+24. Workstation access to the target requires an explicit operator step (`make lab-publish`).

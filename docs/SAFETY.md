@@ -254,3 +254,32 @@ ingestion rejection on peer-IP/host/port mismatch · `assets` identity immutabil
 clear the dirty flag at each failing step · operator-restart escalation path · cancellation SLA ·
 negative-evidence suppression under incomplete coverage · the purge crash-recovery matrix at every
 boundary · retention halt blocking new runs · HMAC key non-appearance and KCV detection.
+
+---
+
+## 9. Amendments after M1 (2026-11-12) — measured network facts
+
+### 9.1 Reachability classes (ADR-0012)
+`internal: true` is **container→internet and container→LAN isolation only**. Measured on the lab:
+container→internet `ENETUNREACH`; container→LAN `ENETUNREACH`; container→host via LAN IP
+`ENETUNREACH`; **container→host via the lab gateway `172.30.10.1` reachable** for any host service
+bound on `0.0.0.0`; **host→container reachable**. Isolation claims in this document are to be read
+with that vocabulary. Consequences enforced: every host publish binds `127.0.0.1` (probe `I14`);
+host-wide `0.0.0.0` listeners are reported (`I14b`); the lab gateway is never a valid target (gates
+8–10 already require the exact registered IP; the D19 forwarder refuses it too).
+
+### 9.2 Host-side loopback forwarder (D19)
+Fixed destination (registered target only; refuses hostnames, the gateway, anything outside the lab
+subnet and any argument), literal loopback bind, L4 relay with no proxy semantics, explicit shutdown,
+never auto-started, negative-tested (`tests/lab/test_forwarder_and_pinning.py`).
+
+### 9.3 API egress boundary (ADR-0012, `NETWORK_ARCHITECTURE.md` §4)
+Outbound from the API exists only as `CONNECT` to the one configured LLM host:443 via an allowlisting
+egress proxy; everything else is denied below the application. The worker holds no proxy variables,
+no provider credentials and no API token, and cannot reach the proxy or the API — so it has no
+indirect internet path either. These become M2 tests before any M2 feature is accepted.
+
+### 9.4 Restart acknowledgement (D23, ADR-0008 R4 §16)
+Bound to container id, start time, a daemon instance UUID, a nonce, operator identity and timestamps;
+single-use, atomically consumed, short-lived; any mismatch invalidates; never clears dirty state on
+its own.

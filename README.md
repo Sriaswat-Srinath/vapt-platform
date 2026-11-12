@@ -25,6 +25,10 @@ Read `CLAUDE.md` for the engineering rules, then the design set in `docs/`:
 | [docs/EVIDENCE_LIFECYCLE.md](docs/EVIDENCE_LIFECYCLE.md) | capture → storage → access → pin → purge |
 | [docs/INVARIANTS.md](docs/INVARIANTS.md) | I1–I14 security invariants and the manifest test |
 | [docs/M1_ACCEPTANCE.md](docs/M1_ACCEPTANCE.md) | M1 scope and acceptance criteria |
+| [docs/M1_REPORT.md](docs/M1_REPORT.md) | M1 results, evidence, deviations D19–D23 and their ratification |
+| [docs/NETWORK_ARCHITECTURE.md](docs/NETWORK_ARCHITECTURE.md) | M1→M2 per-component network access, reachability classes, API egress boundary |
+| [docs/M2_PLAN.md](docs/M2_PLAN.md) | M2 scope, deliverables, acceptance (pending approval) |
+| [lab/README.md](lab/README.md) | lab runbook: bring-up, checks, recovery, forwarder |
 | [docs/adr/](docs/adr/README.md) | ADR-0001 … ADR-0011 (0008–0011 amended R2) |
 | [docs/OPEN_DECISIONS.md](docs/OPEN_DECISIONS.md) | superseded; retained for history |
 

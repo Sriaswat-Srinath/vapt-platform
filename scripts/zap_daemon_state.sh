@@ -8,13 +8,14 @@
 #   zap_daemon_state.sh ack-restart       record an OPERATOR-AUTHORISED restart (one-shot)
 #   zap_daemon_state.sh reset             R2..R7 verification; clears ONLY on full pass
 #
-# R3 identity semantics (clarifies ADR-0008 R3 §10, which did not say how an
-# authorised restart is told apart from an unexplained one):
-#   marker absent + container restarted + NO acknowledgement -> FAIL (state
-#       untrusted; an unexplained restart must never silently clear dirty)
-#   marker absent + container restarted + acknowledgement     -> pass, and the
-#       acknowledgement is CONSUMED (one-shot, recorded, cannot be left open)
-# Only `make lab-zap-restart` writes an acknowledgement.
+# D23 (ratified with conditions) — operator restart acknowledgement:
+#   bound to  container_id, container_started_at, daemon_instance_uuid,
+#             acknowledgement_nonce, operator_identity, issued_at, expires_at
+#   single-use, ATOMICALLY consumed (os.replace of the state file), short-lived
+#   (ACK_TTL_SECONDS, default 600); ANY identity mismatch invalidates it; it is
+#   consulted ONLY by step R3 and can NEVER clear the dirty flag by itself —
+#   the flag clears only at R8 after R2..R7 all pass.
+# Only `make lab-zap-restart` issues an acknowledgement.
 #
 # The platform cannot start/stop/restart containers: Docker socket access is
 # prohibited (ADR-0008 R3 §9). Container restart is an operator action:
@@ -30,13 +31,19 @@ AUDIT="$STATE_DIR/zap-daemon-audit.log"
 audit() { printf '%s actor=%s action=%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${USER:-operator}" "$1" "${2:-}" >> "$AUDIT"; }
 jget() { python3 -c "import json,sys;print(json.load(open('$STATE')).get('$1'))"; }
 jset() { STATE_FILE="$STATE" python3 - "$@" <<'PY'
-import json,os,sys
+import json,os,sys,tempfile
 p=os.environ["STATE_FILE"]; d=json.load(open(p))
 for kv in sys.argv[1:]:
     k,v=kv.split("=",1)
     d[k]=json.loads(v) if v in ("true","false","null") or v.startswith(('{','[','"')) else v
-json.dump(d,open(p,"w"),indent=2)
+fd,tmp=tempfile.mkstemp(dir=os.path.dirname(p) or ".",prefix=".state.")
+with os.fdopen(fd,"w") as f: json.dump(d,f,indent=2); f.flush(); os.fsync(f.fileno())
+os.replace(tmp,p)                      # atomic: readers never see a partial state
 PY
+}
+ACK_TTL_SECONDS="${ACK_TTL_SECONDS:-600}"
+container_identity() {   # prints: <container_id> <started_at>
+  docker inspect vapt_zap --format '{{.Id}} {{.State.StartedAt}}' 2>/dev/null || echo "none none"
 }
 api() { # in-lab, allowlisted client at .30 — the host (.1) is not allowlisted
   local img; img=$(docker inspect vapt_juiceshop --format '{{.Image}}' 2>/dev/null)
@@ -50,12 +57,27 @@ step() { printf '  %-28s %s\n' "$1" "$2"; }
 
 case "${1:-status}" in
 status)
-  echo "dirty=$(jget is_dirty) reason=$(jget dirty_reason) requires_operator_restart=$(jget requires_operator_restart) marker=$(jget instance_marker) operator_restart_ack=$(jget operator_restart_ack)";;
+  echo "dirty=$(jget is_dirty) reason=$(jget dirty_reason) requires_operator_restart=$(jget requires_operator_restart) marker=$(jget instance_marker) ack_pending=$(python3 -c "import json;print(isinstance(json.load(open('$STATE')).get('operator_restart_ack'),dict))")";;
 ack-restart)
-  started=$(docker inspect vapt_zap --format '{{.State.StartedAt}}' 2>/dev/null)
-  jset "operator_restart_ack=${started:-unknown}"
-  audit ack_restart "container_started_at=${started:-unknown}"
-  echo "recorded operator-authorised restart at ${started:-unknown} (one-shot; consumed by the next reset)";;
+  read -r cid started < <(container_identity)
+  [ "$cid" != none ] || { echo "refused: no running vapt_zap container to acknowledge"; exit 1; }
+  ack=$(python3 - "$cid" "$started" "$ACK_TTL_SECONDS" "${OPERATOR_ID:-${USER:-operator}}" <<'PYACK'
+import json,sys,uuid,secrets,datetime as dt
+cid,started,ttl,op=sys.argv[1:5]
+now=dt.datetime.now(dt.timezone.utc)
+print(json.dumps({
+  "container_id": cid, "container_started_at": started,
+  "daemon_instance_uuid": str(uuid.uuid4()),
+  "acknowledgement_nonce": secrets.token_hex(16),
+  "operator_identity": op,
+  "issued_at": now.isoformat(timespec="seconds"),
+  "expires_at": (now+dt.timedelta(seconds=int(ttl))).isoformat(timespec="seconds")}))
+PYACK
+)
+  jset "operator_restart_ack=$ack"
+  nonce=$(printf '%s' "$ack" | python3 -c 'import json,sys;print(json.load(sys.stdin)["acknowledgement_nonce"][:8])')
+  audit ack_issued "container_id=${cid:0:12} started_at=$started ttl=${ACK_TTL_SECONDS}s operator=${OPERATOR_ID:-${USER:-operator}} nonce=$nonce"
+  echo "issued operator restart acknowledgement (single-use, expires in ${ACK_TTL_SECONDS}s). It does NOT clear dirty state; run: make zap-reset";;
 mark-dirty)
   jset "is_dirty=true" "dirty_reason=${2:-unspecified}"
   audit mark_dirty "reason=${2:-unspecified}"
@@ -68,20 +90,54 @@ reset)
   if [ "$code" = 200 ]; then step "R2 health" "pass ($r)"; else step "R2 health" "FAIL ($r)"; ok=false; failing=R2; fi
   if [ "$ok" = true ]; then
     # R3 identity: is the daemon the one we last verified?
-    marker=$(jget instance_marker); ack=$(jget operator_restart_ack)
-    started=$(docker inspect vapt_zap --format '{{.State.StartedAt}}' 2>/dev/null)
+    marker=$(jget instance_marker)
+    read -r cid started < <(container_identity)
     r=$(api "/JSON/context/view/contextList/?apikey=${ZAP_API_KEY}")
+    ACK_UUID=""
     if [ "$marker" = "None" ] || [ "$marker" = "null" ]; then
       step "R3 identity" "pass (no prior marker; first verification)"
     elif echo "$r" | grep -q "$marker"; then
       step "R3 identity" "pass (marker $marker present — same daemon instance)"
-    elif [ "$ack" != "None" ] && [ "$ack" != "null" ] && [ "$ack" = "$started" ]; then
-      step "R3 identity" "pass (marker absent, but restart at $started is operator-authorised)"
-      jset "operator_restart_ack=null"       # one-shot: consumed here
-      audit ack_consumed "container_started_at=$started"
+      if python3 -c "import json,sys;sys.exit(0 if isinstance(json.load(open('$STATE')).get('operator_restart_ack'),dict) else 1)"; then
+        jset "operator_restart_ack=null"; audit ack_invalidated "reason=not_needed_marker_present"
+        step "R3 identity" "note: an unused acknowledgement was on file; invalidated (never carried forward)"
+      fi
     else
-      step "R3 identity" "FAIL (marker $marker absent and the restart is NOT authorised — daemon state untrusted)"
-      ok=false; failing=R3
+      # Marker absent: the daemon restarted. Trusted ONLY via a valid acknowledgement.
+      verdict=$(STATE_FILE="$STATE" python3 - "$cid" "$started" <<'PYR3'
+import json,os,sys,datetime as dt,tempfile
+p=os.environ["STATE_FILE"]; d=json.load(open(p)); cid,started=sys.argv[1:3]
+ack=d.get("operator_restart_ack")
+def finish(result, reason):
+    if result in ("VALID","INVALID"):          # single-use or invalidated: remove atomically
+        d["operator_restart_ack"]=None
+        fd,tmp=tempfile.mkstemp(dir=os.path.dirname(p) or ".",prefix=".state.")
+        with os.fdopen(fd,"w") as f: json.dump(d,f,indent=2); f.flush(); os.fsync(f.fileno())
+        os.replace(tmp,p)
+    a=ack if isinstance(ack,dict) else {}
+    print(f"{result}|{reason}|{a.get('daemon_instance_uuid','')}|{a.get('acknowledgement_nonce','')[:8]}")
+    sys.exit(0)
+if not isinstance(ack,dict): finish("NONE","no acknowledgement on file")
+now=dt.datetime.now(dt.timezone.utc)
+try: exp=dt.datetime.fromisoformat(ack["expires_at"])
+except Exception: finish("INVALID","malformed expires_at")
+if now>exp: finish("INVALID",f"expired at {ack['expires_at']}")
+if ack.get("container_id")!=cid: finish("INVALID","container_id mismatch")
+if ack.get("container_started_at")!=started: finish("INVALID","container_started_at mismatch")
+for k in ("daemon_instance_uuid","acknowledgement_nonce","operator_identity","issued_at"):
+    if not ack.get(k): finish("INVALID",f"missing {k}")
+finish("VALID",f"operator={ack['operator_identity']} issued_at={ack['issued_at']}")
+PYR3
+)
+      IFS='|' read -r vres vreason ACK_UUID vnonce <<< "$verdict"
+      if [ "$vres" = VALID ]; then
+        step "R3 identity" "pass (marker absent; restart acknowledged — $vreason; nonce=$vnonce; consumed)"
+        audit ack_consumed "container_id=${cid:0:12} started_at=$started nonce=$vnonce uuid=$ACK_UUID"
+      else
+        [ "$vres" = INVALID ] && audit ack_invalidated "reason=$vreason nonce=$vnonce"
+        step "R3 identity" "FAIL (marker $marker absent; restart NOT authorised: $vreason — daemon state untrusted)"
+        ok=false; failing=R3
+      fi
     fi
   fi
   if [ "$ok" = true ]; then
@@ -105,10 +161,10 @@ reset)
       else step "R6 api probe" "FAIL (create=$c list=$l remove=$d)"; ok=false; failing=R6; fi
   fi
   if [ "$ok" = true ]; then
-    nm="vapt-instance-$(date +%s)"
+    nm="vapt-instance-${ACK_UUID:-$(python3 -c 'import uuid;print(uuid.uuid4())')}"
     c=$(api "/JSON/context/action/newContext/?apikey=${ZAP_API_KEY}&contextName=$nm")
-    started=$(docker inspect vapt_zap --format '{{.State.StartedAt}}' 2>/dev/null)
-    if [ "${c%%|*}" = 200 ]; then jset "instance_marker=$nm" "marker_container_started_at=${started:-unknown}"; step "R7 new marker" "pass ($nm)"
+    read -r cid started < <(container_identity)
+    if [ "${c%%|*}" = 200 ]; then jset "instance_marker=$nm" "marker_container_started_at=${started:-unknown}" "marker_container_id=$cid"; step "R7 new marker" "pass ($nm)"
     else step "R7 new marker" "FAIL ($c)"; ok=false; failing=R7; fi
   fi
   if [ "$ok" = true ]; then

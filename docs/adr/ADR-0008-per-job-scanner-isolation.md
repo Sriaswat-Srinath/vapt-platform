@@ -217,3 +217,38 @@ so detection latency is one checkpoint.
 Exceeding the ceiling is not an indefinite wait: `failed`, `stop_reason='cancel_unconfirmed'`, daemon
 dirty, alert raised. Tested deterministically against the mock adapter and wall-clock against real ZAP
 (invariant **I13**).
+
+---
+
+## Amendment R4 (2026-11-12) — ratified M1 deviations D22 and D23
+
+### 15. Read-only rootfs and the JVM (D22)
+ZAP runs with `read_only: true`. Writable paths are explicit tmpfs mounts, each `nosuid`, owned by
+the non-root `zap` user (`uid=1000,gid=1000,mode=0770`) because a tmpfs declared with options is
+otherwise root-owned `0755` and ZAP fails with *"Unable to create home directory /home/zap/.ZAP/"*:
+
+| Path | Why ZAP needs it | Size | Flags |
+|---|---|---|---|
+| `/home/zap` | `.ZAP/` home: config, session DB, add-on state, generated root CA, Java prefs | 512 MiB | `rw,nosuid` |
+| `/tmp` | JVM temporary files; the JVM and some add-ons **map native libraries from here**, so it must be executable | 128 MiB | `rw,nosuid` — **`noexec` deliberately removed** |
+| `/zap/wrk` | ZAP's declared working directory for reports/session exports | 64 MiB | `rw,nosuid` |
+
+`noexec` on `/tmp` was removed because the JVM requires it; the compensating controls are that
+`/tmp` is a size-capped tmpfs inside a container that is non-root, `cap_drop: ALL`,
+`no-new-privileges`, read-only everywhere else and attached to a network with no egress.
+
+### 16. Operator restart acknowledgement (D23, strengthened)
+A restarted daemon has lost its instance marker, so step R3 cannot distinguish an authorised restart
+from an unexplained one without evidence. That evidence is an **acknowledgement issued only by
+`make lab-zap-restart`**, bound to:
+
+`container_id` · `container_started_at` · `daemon_instance_uuid` (the marker R7 must stamp) ·
+`acknowledgement_nonce` · `operator_identity` · `issued_at` · `expires_at` (`ACK_TTL_SECONDS`, 600).
+
+Rules, all tested: **single-use** (consumed on the R3 evaluation that reads it); **atomic** (state
+written to a temp file and `os.replace`d); **short-lived**; **any mismatch** of `container_id`,
+`container_started_at`, expiry or a missing bound field **invalidates** it (removed, audited); an
+acknowledgement that turns out not to be needed (marker still present) is invalidated, never carried
+forward; and **it can never clear the dirty flag by itself** — it is consulted only by R3, and the
+flag clears only at R8 after R2–R7 all pass. Every issue/consume/invalidate is appended to the
+daemon audit log. In M5 the same object moves into `scanner_resets`/`scanner_daemon_state`.

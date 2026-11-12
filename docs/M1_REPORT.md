@@ -227,3 +227,38 @@ proven by test: *restarting the container can never launder a dirty daemon.*
    `DUAL_CONTROL_AVAILABLE=false`. `MOCK-WEB-001.md` unsigned and untouched. No ScopeGrant exists.**
 
 **Failed tests at completion: none.**
+
+
+---
+
+## 12. Post-acceptance addendum (ratification conditions, 2026-11-12)
+
+| Deviation | Condition | Implemented | Verified by |
+|---|---|---|---|
+| D19 | fixed destination IP+port, loopback-only, no proxying, explicit shutdown, no auto-start, **negative test for unrelated destination** | `scripts/lab_publish.py` takes no arguments; refuses hostnames, the gateway, anything outside `LAB_SUBNET`; literal `127.0.0.1`; `lab-down` stops it | `test_forwarder_and_pinning.py` — 8 refusal cases, proxy-abuse (CONNECT / absolute-URI), established-peer check, no auto-start |
+| D20 | distinguish the reachability classes; never call `internal` host isolation | measured matrix (including a controlled `0.0.0.0` host listener) recorded in every check as `reachability_matrix`; new probes `I14`/`I14b` | `SECURITY_ASSUMPTIONS.md` §H, `SAFETY.md` §9.1, ADR-0012 |
+| D21 | keep digest pinning + reproducible startup/reset | unchanged | `test_lab_images_are_digest_pinned`, `test_running_containers_match_pinned_digests`, reset-scoping test |
+| D22 | document JVM needs, writable paths, permissions, why `noexec` was removed | ADR-0008 R4 §15, `lab/README.md` | probe `I6b` |
+| D23 | bind to container_id, started_at, daemon_instance_uuid, nonce, operator identity, timestamps; single-use, atomic, short-lived; mismatch invalidates; never clears dirty alone | `scripts/zap_daemon_state.sh` (`ack-restart`, R3, R7) | `test_restart_acknowledgement.py` — 9 cases incl. tamper matrix, TTL, unused-ack invalidation, never-clears-dirty; recovery suite |
+
+**Preserved:** `docs/evidence/m1/` untouched; the induced-failure test retained (`make
+lab-prove-failure`, run again after these changes); the 13 milestone-aware invariant skips unchanged;
+no skipped invariant converted to a pass.
+
+**Re-verified after the changes:** flags all `false`; `MOCK-WEB-001.md` byte-identical to commit
+`83497ce`; `scope_grant: null`; ZAP reports zero active scans, zero spider scans, zero alerts, zero
+messages (§13 below records the actual query output).
+
+## 13. No-scan verification — asked of the daemon itself (2026-11-12, after all suites)
+
+```
+active scans  : {"scans":[]}
+spider scans  : {"scans":[]}
+alerts        : {"numberOfAlerts":"0"}
+sites         : {"sites":[]}
+messages      : {"numberOfMessages":"0"}
+```
+
+Queried from an allowlisted in-lab client after the full test run (which itself starts no scan). Flags `SCANNER_EXECUTION_ENABLED`, `ZAP_ADAPTER_ENABLED`, `ACTIVE_SCAN_ENABLED`, `DUAL_CONTROL_AVAILABLE` are `false` in both `.env` and `.env.example`; `lab/authorisation/MOCK-WEB-001.md` is byte-identical to commit `83497ce`; `scope_grant` is `null` and no grant file is tracked.
+
+Final run after ratification changes: **39/39 probes**, induced failure flips 6 probes and recovers, **69 passed / 13 skipped / 0 failed** (`tests/lab` + `backend/tests/invariants`).

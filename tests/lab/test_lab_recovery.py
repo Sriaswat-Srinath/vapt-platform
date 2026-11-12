@@ -90,7 +90,7 @@ def test_dirty_daemon_cannot_be_cleared_without_verification():
     assert reset.returncode == 0, reset.stdout[-2000:] + reset.stderr[-1000:]
     state = json.loads(STATE.read_text())
     assert state["is_dirty"] is False, "verified operator recovery did not clear the flag"
-    assert state["operator_restart_ack"] in (None, "null"), "acknowledgement must be one-shot"
+    assert state["operator_restart_ack"] is None, "acknowledgement must be single-use (consumed)"
     for step in ("R2", "R3", "R4", "R5", "R6", "R7"):
         assert step in reset.stdout
 
@@ -109,7 +109,7 @@ def test_dirty_state_transitions_are_audited():
     log = REPO / ".lab-state" / "zap-daemon-audit.log"
     assert log.exists(), "no audit log for daemon state transitions"
     text = log.read_text()
-    for action in ("mark_dirty", "reset_failed", "ack_restart", "ack_consumed", "reset_verified"):
+    for action in ("mark_dirty", "reset_failed", "ack_issued", "ack_consumed", "reset_verified"):
         assert f"action={action}" in text, f"transition {action} never audited"
 
 

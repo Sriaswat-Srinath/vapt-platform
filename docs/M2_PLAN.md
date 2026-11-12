@@ -1,0 +1,42 @@
+# M2 Implementation Plan — Backend, database, asset management
+
+**Not started. Awaiting approval of this plan and of `NETWORK_ARCHITECTURE.md`.**
+
+## 1. Scope
+In: FastAPI skeleton (config, structured logging, trace ids, RFC 9457 errors), Alembic baseline
+(identity, audit chain, assets, scope rules, scope grants **with `document_state` CHECK**,
+approvals, operator identities), asset CRUD + scope rules, token auth and roles, `/system/*`
+readiness/capabilities/isolation, the compose services `api`, `postgres`, `redis`, `egress-proxy`,
+`frontend` placeholder, and the M2 network tests from `NETWORK_ARCHITECTURE.md` §6.
+
+Out: scanning of any kind, worker job execution (skeleton container only, airgap-tested), discovery,
+ZAP adapter, agent, LLM calls, reports, grant activation.
+
+## 2. Standing conditions (unchanged)
+`SCANNER_EXECUTION_ENABLED=false` · `ACTIVE_SCAN_ENABLED=false` · `DUAL_CONTROL_AVAILABLE=false` ·
+`MOCK-WEB-001.md` unsigned and untouched · no ScopeGrant activated · no scan performed · lab evidence
+and the 13 milestone-aware skips preserved; invariants **I9** and **I14** become implemented (their
+milestone is M2) and the manifest flips them from skipped to required.
+
+## 3. Deliverables and acceptance
+| # | Deliverable | Acceptance |
+|---|---|---|
+| 1 | `docker-compose.yml` services on `vapt_edge`/`vapt_core`; egress-proxy; all publishes `127.0.0.1` | `I14` passes; worker airgap tests (§6 of the network doc) pass |
+| 2 | Alembic baseline + migration tests | up/down clean; CHECKs and triggers asserted by rejection tests |
+| 3 | Asset registration | rejects non-`mock_lab`, duplicate host:port, identity updates (trigger) — **I14** |
+| 4 | Scope grants | cannot activate unless `document_state='signed_verified'`; startup refuses a tampered active grant — **I9** |
+| 5 | Auth + roles | Argon2 tokens, expiry, revocation, per-call audit |
+| 6 | Audit chain | `/audit/verify` passes; app role lacks UPDATE/DELETE |
+| 7 | `/system/isolation` | reads the M1 check JSON (`isolation_passed`, `valid_until`); stale ⇒ not passed |
+| 8 | Fail-fast config | the 16 startup validations from `CONFIGURATION.md` that are testable without scanner code |
+| 9 | Tests | unit + integration against real Postgres (testcontainers); invariants I9, I14 implemented |
+
+## 4. Order of work
+compose + networks + egress proxy (with tests first) → config + logging + errors → migrations →
+auth → assets/scope → grants/approvals/identities → system endpoints → audit verify → invariants.
+
+## 5. Risks specific to M2
+egress-proxy ACL correctness (tested both directions) · `enable_ip_masquerade=false` behaviour on
+this host (measured, not assumed, before relying on it) · uvicorn single-interface bind in a container
+(fallback: api on `vapt_edge` only with postgres/redis reached through a second internal network the
+worker is not on).

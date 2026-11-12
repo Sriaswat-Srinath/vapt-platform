@@ -175,7 +175,25 @@ if [ -n "$lanip" ]; then
   add F4c 000 "$lanhttp" "$(pass_fail "$lanhttp" 000)" "LAN interface ${lanip}:${PUBLISH_PORT} must NOT serve the app"
 fi
 
-# === verdict =================================================================
+# === I14 no VAPT container publishes on 0.0.0.0 (D20: containers reach host
+#      services bound on 0.0.0.0 via the lab gateway; a 0.0.0.0 publish of any
+#      VAPT component would also expose it to the LAN) =========================
+wild=$(docker ps --filter "label=com.docker.compose.project=vapt" --format '{{.Names}} {{.Ports}}' 2>/dev/null | grep -c '0\.0\.0\.0:' || true)
+add I14 0 "$wild" "$(pass_fail "$wild" 0)" "vapt containers with a 0.0.0.0 host publish"
+hostwild=$(ss -lntH 2>/dev/null | awk '{print $4}' | grep -E '^(0\.0\.0\.0|\*|\[::\]):' | sort -u | tr '\n' ' ')
+add I14b "<none>" "${hostwild:-<none>}" "$([ -z "$hostwild" ] && echo true || echo false)" "host listeners on 0.0.0.0 — reachable from lab containers via ${SUBNET%.*}.1 (D20)"
+
+# === reachability matrix (D20) — observed classes, recorded not judged =======
+# ECONNREFUSED to the gateway proves L3 reachability of the host without a listener;
+# ENETUNREACH proves absence of a route (the actual isolation mechanism).
+GW="$(docker network inspect "$LAB_NET" --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}' 2>/dev/null)"; GW="${GW:-${SUBNET%.*}.1}"
+js_err() { docker exec "$JS_C" "$JS_NODE" -e "
+const s=require('net').connect({host:'$1',port:$2,timeout:4000});
+s.on('connect',()=>{console.log('REACHABLE');process.exit()});
+s.on('error',e=>{console.log(e.code);process.exit()});s.on('timeout',()=>{console.log('TIMEOUT');process.exit()});" 2>/dev/null || echo PROBE_ERROR; }
+M_INET=$(js_err 1.1.1.1 443); M_LAN=$(js_err "${LAN_GW:-192.168.1.1}" 80); M_HOSTGW=$(js_err "$GW" 9); M_HOSTLAN=$(js_err "$(ip -o -4 addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1)" 9); M_PEER=$(js_err "${ZAP_IP:-172.30.10.10}" 8080)
+H_ZAP=$(timeout 4 bash -c "exec 3<>/dev/tcp/${ZAP_IP:-172.30.10.10}/8080" >/dev/null 2>&1 && echo REACHABLE || echo BLOCKED)
+classify() { case "$1" in REACHABLE) echo reachable;; ECONNREFUSED) echo "host-reachable-at-L3 (nothing listening)";; ENETUNREACH) echo "no-route";; TIMEOUT) echo "filtered-or-dropped";; *) echo "$1";; esac; }
 # isolation_passed : every I* probe  -> this is what the M3 scan gate consumes
 # access_passed    : every F* probe  -> workstation convenience (D19 forwarder)
 # passed           : both. Convenience must never move the scan gate either way.
@@ -199,6 +217,15 @@ valid=$(date -u -d "+${TTL_MIN} minutes" +%Y-%m-%dT%H:%M:%SZ)
   echo "  \"subnet\": \"$SUBNET\","
   echo "  \"egress_blocked\": $egress_blocked,"
   echo "  \"dns_contained\": $dns_contained,"
+  echo "  \"reachability_matrix\": {"
+  echo "    \"container_to_internet\": \"$(classify "$M_INET")\","
+  echo "    \"container_to_lan\": \"$(classify "$M_LAN")\","
+  echo "    \"container_to_host_via_lab_gateway\": \"$(classify "$M_HOSTGW")\","
+  echo "    \"container_to_host_via_lan_ip\": \"$(classify "$M_HOSTLAN")\","
+  echo "    \"container_to_container_same_lab\": \"$(classify "$M_PEER")\","
+  echo "    \"host_to_container\": \"$(classify "$H_ZAP")\","
+  echo "    \"note\": \"internal:true is NOT host isolation: the host reaches containers, and containers reach host services bound on 0.0.0.0 via the lab gateway. Isolation claims cover container->internet and container->LAN only.\""
+  echo "  },"
   echo "  \"isolation_passed\": $isolation_passed,"
   echo "  \"access_passed\": $access_passed,"
   echo "  \"passed\": $passed,"
