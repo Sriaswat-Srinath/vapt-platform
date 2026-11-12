@@ -188,3 +188,69 @@ redactor-failure fail-closed, and an `agent/` import attempt on a raw reader fai
 unregistered in-subnet host rejected · non-loopback publish refused at startup · raw evidence access
 denied to `analyst` and audited for `admin` · retention purge keeps provenance and respects the
 report-artifact pin.
+
+---
+
+## 8. Amendments R3 (2026-11-12)
+
+### 8.1 Synthetic-only enforcement is provenance-based (ADR-0011 R3 §13)
+
+The `environment='mock_lab'` CHECK is metadata; the enforcement is the route plus ingestion controls:
+no evidence exists outside a job (worker-only writes, `raw_observations.job_id NOT NULL`); ingestion
+independently rejects observations whose peer IP ∉ `scan_jobs.pinned_ips` or whose host/port differ
+from the registered asset (rejected, audited, never stored); `assets.environment`, `hostname`,
+`protocol` and `port` are immutable by trigger; and `GET /system/provenance/verify` walks every
+evidence row against the chain `evidence → raw_observation → scan_job → scope_decision(allow) →
+asset(mock_lab) → scope_grant(signed_verified)` plus `asset_resolutions` and the covering
+`lab_isolation_checks` record, quarantining violations.
+
+### 8.2 Scanner reset cannot restart containers (ADR-0008 R3 §9–11)
+
+Docker socket access is permanently prohibited, so the platform **cannot start, stop or restart the
+ZAP container** and no code path attempts it. `POST /system/scanner/reset` is an in-daemon
+re-initialisation whose nine steps (lease → health → identity → `newSession` → assert empty → API
+probe → new marker → clear → audit) **must all succeed before the dirty flag clears**. There is no
+force parameter, no config override, no automatic expiry. Where the daemon is unreachable or its
+identity has changed, the endpoint sets `requires_operator_restart`, returns `503`, and the operator
+runs `make lab-zap-restart` then `make lab-check` **outside the application**. ZAP runs with
+`restart: "no"` so a crashed daemon stays down instead of returning with a deceptively clean session.
+
+### 8.3 Bounded cancellation (ADR-0008 R3 §14)
+
+Cancellation checkpoints are every ZAP poll tick (`CANCEL_CHECK_INTERVAL_SECONDS=2`), between
+collection pages and between phases — **not** at the end of a long phase. Revocation sets
+`cancel_requested_at` in its own transaction. Each teardown step is individually bounded and the total
+is capped by `CANCELLATION_SLA_SECONDS=120`; exceeding it yields `failed` +
+`stop_reason='cancel_unconfirmed'` + dirty daemon + alert, never an indefinite wait.
+
+### 8.4 Incomplete coverage cannot confirm (ADR-0008 R3 §13)
+
+When `coverage_complete=false`, negative-evidence validation rules are suppressed and resolve to
+`inconclusive` (`reason='incomplete_coverage'`); positive-evidence rules may still confirm.
+`coverage_complete` is a recorded rule input, and the report marks the scan partial.
+
+### 8.5 Purge crosses two systems that cannot be atomic (ADR-0011 R3 §12)
+
+Postgres transactions and filesystem operations cannot be made atomic together, so the crossing is
+made recoverable instead: intent is committed first (`pending_delete`), the file is unlinked, verified
+absent and its directory `fsync`ed, and only then is the row updated. The sole reachable
+inconsistency is "bytes gone, row stale" — detectable and repairable. The inverse, "row says purged
+while the secret is on disk", is unreachable. Any failed item or unexpectedly missing blob **halts new
+destructive runs** until an audited admin acknowledgement.
+
+### 8.6 HMAC key handling (ADR-0010 R3)
+
+Key only from the environment, held as `SecretBytes`, never persisted; refs carry key id and
+`hmac_alg`; no key history retained; rotation audited and a silent rotation detected by a key check
+value (which disables the agent until the id is corrected); integrity hashes are unkeyed and unaffected
+by rotation; the key value cannot appear in logs, config dumps, exceptions or prompts (four
+independent mechanisms, asserted by invariant I11).
+
+### 8.7 Test obligations added
+
+The invariant suite `backend/tests/invariants/` (I1–I14) plus its manifest test, per
+[INVARIANTS.md](INVARIANTS.md). Specifically added this round: provenance-chain violation quarantine ·
+ingestion rejection on peer-IP/host/port mismatch · `assets` identity immutability · reset refusing to
+clear the dirty flag at each failing step · operator-restart escalation path · cancellation SLA ·
+negative-evidence suppression under incomplete coverage · the purge crash-recovery matrix at every
+boundary · retention halt blocking new runs · HMAC key non-appearance and KCV detection.

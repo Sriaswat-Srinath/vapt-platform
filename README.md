@@ -23,6 +23,7 @@ Read `CLAUDE.md` for the engineering rules, then the design set in `docs/`:
 | [docs/SCANNER_LIFECYCLE.md](docs/SCANNER_LIFECYCLE.md) | ZAP locks, job states, teardown, dirty-daemon recovery |
 | [docs/REDACTION_DATAFLOW.md](docs/REDACTION_DATAFLOW.md) | what reaches the LLM, and how it is redacted |
 | [docs/EVIDENCE_LIFECYCLE.md](docs/EVIDENCE_LIFECYCLE.md) | capture → storage → access → pin → purge |
+| [docs/INVARIANTS.md](docs/INVARIANTS.md) | I1–I14 security invariants and the manifest test |
 | [docs/M1_ACCEPTANCE.md](docs/M1_ACCEPTANCE.md) | M1 scope and acceptance criteria |
 | [docs/adr/](docs/adr/README.md) | ADR-0001 … ADR-0011 (0008–0011 amended R2) |
 | [docs/OPEN_DECISIONS.md](docs/OPEN_DECISIONS.md) | superseded; retained for history |

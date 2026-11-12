@@ -177,3 +177,117 @@ blobs (per-blob data key wrapped by a KMS/operator key), encrypted database colu
 text, and a key-management and rotation design. Tracked as **open decision D13**; the platform must
 not be pointed at non-synthetic targets until it is resolved. A startup warning fires whenever an
 asset outside `environment='mock_lab'` exists — which the MVP's CHECK constraint already forbids.
+
+---
+
+## Amendment R3 (2026-11-12) — purge atomicity, and synthetic-only provenance
+
+### 12. PostgreSQL transactions and filesystem operations are not, and cannot be, atomic together
+
+There is no two-phase commit between Postgres and the filesystem. A transaction cannot be rolled back
+once a file is unlinked, and an unlink cannot be undone when a transaction aborts. **We therefore do
+not attempt atomicity.** Instead the crossing is made *recoverable*: intent is committed to the
+database before any filesystem change, and the order is chosen so the only reachable inconsistency is
+the safe, detectable one.
+
+Each step boundary touches **exactly one** system — never both:
+
+| Step | System | Operation | Committed outcome |
+|---|---|---|---|
+| **S0** | DB tx | plan the whole run: one `retention_run_items` row per candidate, `state='planned'` | a complete, resumable plan exists before anything is destroyed |
+| **S1** | DB tx | `SELECT … FROM evidence_blobs WHERE id=:b FOR UPDATE`; **recount active references by query**; if > 0 ⇒ `skipped_referenced` / `skipped_pinned` and stop. Else `blob.state='pending_delete'`, `item.state='intent_committed'`, `attempts += 1` | **the crossing point.** After this commit, an absent file is *expected* |
+| **S2** | filesystem | pre-unlink identity checks → `unlink(path)` → verify absence → `fsync` the containing directory | the bytes are gone **and durably gone** |
+| **S3** | DB tx | re-assert recount == 0; `blob.state='purged'`, `purged_at`; `evidence.blob_purged_at` for referencing rows; `item.state='row_nulled'` → `'done'` | bookkeeping catches up to the filesystem |
+| **S4** | DB tx | run counts; set `retention_state.halted` if any item is `failed` or any blob is unexpectedly `missing` | inconsistency stops further deletion |
+
+### 12.1 Committed-intent state machine
+
+```
+planned ──S1──▶ intent_committed ──S2──▶ unlinked ──S3──▶ row_nulled ──▶ done
+   │                   │                     │
+   │                   │                     └─ file still present after unlink ⇒ failed + HALT
+   │                   └─ pre-unlink identity check fails ⇒ failed + HALT (never unlink)
+   └─ active reference found ⇒ skipped_referenced | skipped_pinned (terminal, not an error)
+```
+
+**Intent is the discriminator, never the filesystem.** A missing file is expected only when
+`blob.state='pending_delete'` and an item for it exists; otherwise it is an unexpected loss recorded
+as `blob.state='missing'`, raised as an integrity alert, audited, and **never** recorded as a purge.
+
+### 12.2 Locking and the durability of the recount
+
+- The recount is **computed by query** inside S1, under `FOR UPDATE` on the `evidence_blobs` row —
+  never from a cached counter, and never only at planning time.
+- A trigger rejects any new `evidence.blob_id` (or `report_artifacts.artifact_blob_id`) referencing a
+  blob whose `state <> 'present'`. This is what makes S1's count durable across S2: a new reference
+  cannot appear while deletion is in flight, so S3's re-assertion cannot fail spuriously.
+- The recount re-runs on **every** attempt, so resumption is never a fast path that skips the check.
+  A reference created between planning and S1 yields `skipped_referenced`.
+
+### 12.3 Unlink verification (S2 in detail)
+
+Before unlinking: `lstat` the path (must not be a symlink), assert the resolved real path is under
+`EVIDENCE_BLOB_ROOT`, assert the path matches the content-addressed layout for
+`content_sha256`, and assert `st_size == evidence_blobs.byte_size`. Any mismatch ⇒ `failed` + halt,
+**without unlinking** — the platform refuses to delete a file it cannot positively identify as the
+blob it intends to delete.
+
+After unlinking: `stat` must raise `ENOENT` (a still-present file ⇒ `failed` + halt), and the
+containing directory is `fsync`ed so the deletion survives power loss. Without that fsync a crash
+could resurrect the file while the database claimed `purged` — the exact inconsistency this ordering
+exists to prevent. `ENOENT` from the unlink itself is **success** (idempotent).
+
+### 12.4 Crash recovery matrix
+
+| Crash point | Observed state | Interpretation | Recovery |
+|---|---|---|---|
+| after S0 | items `planned`, nothing destroyed | plan intact | resume from S1; nothing lost |
+| between S1 and S2 | blob `pending_delete`, file **present** | intent committed, unlink not done | re-run S2 (idempotent), then S3 |
+| during S2 | blob `pending_delete`, file absent or partially handled | unlink done or indeterminate | re-run S2 (`ENOENT` ⇒ success), verify, then S3 |
+| between S2 and S3 | blob `pending_delete`, file **absent** | **the expected inconsistency** — bytes gone, row stale | re-run S3; row ends `purged` |
+| after S3 | blob `purged`, file absent | complete | mark item `done` if not already |
+| any | blob `present`, file absent, **no intent** | unexpected loss | `state='missing'`, integrity alert, **halt**; never recorded as a purge |
+
+The reverse inconsistency — *row says purged while the secret is still on disk* — is unreachable,
+because S3 runs only after a verified, fsynced unlink. That asymmetry is the whole point of the
+ordering.
+
+### 12.5 Recovery is audited and halts on inconsistency
+
+A worker-startup reconciler marks `running` runs with a stale lease as `interrupted` and resumes them
+item by item. Every attempt writes an audit row (run, item, prior state, outcome, `actor_kind=system`,
+trace id); resumption itself is audited as `retention_run_resumed`. An item exceeding
+`RETENTION_ITEM_MAX_ATTEMPTS` is `failed`.
+
+**Any `failed` item, or any unexpectedly `missing` blob, sets `retention_state.halted = true` with the
+reason and offending ids. While halted, no new destructive run may start** (planning and dry-run still
+work); the in-flight run finishes only items already proven safe. Clearing the halt requires an admin
+acknowledgement with a justification, audited. This supersedes the R2 wording "the run completes
+without it", which would have allowed deletions to continue past an unexplained inconsistency.
+
+### 13. Synthetic-only enforcement rests on provenance, not on the `mock_lab` label
+
+The `environment='mock_lab'` CHECK is metadata. The enforcement is:
+
+1. **No evidence exists outside a job.** No API, import or admin-upload path writes
+   `raw_observations` or `evidence`; both are worker-only writes, and `raw_observations.job_id` is
+   `NOT NULL` with an FK. The mandatory chain is
+   `evidence → raw_observation → scan_job → scope_decision(allow) → asset(mock_lab) →
+   scope_grant(signed_verified)`.
+2. **Ingestion re-validates provenance independently of request time.** Each observation carries its
+   observed peer IP, host and port; ingestion rejects any whose peer IP ∉ `scan_jobs.pinned_ips` or
+   whose host/port ≠ the registered asset — rejected and audited, never stored.
+3. **Identity fields are immutable.** A BEFORE UPDATE trigger rejects changes to
+   `assets.environment`, `hostname`, `protocol` and `port`; re-registration is required and audited.
+   Relabelling gains nothing: gates 8–10 still require lab-resolver resolution into `allowed_cidrs`
+   and the exact registered host and port, and ADR-0005's topology leaves the worker no other route.
+   **Synthetic-only is enforced by the route; the label is metadata.**
+4. **Chain integrity is checked, not assumed.** A scheduled job and
+   `GET /system/provenance/verify` walk every evidence row against the chain, `asset_resolutions`
+   history and the `lab_isolation_checks` record covering the job's window. Violations **quarantine**
+   the finding: flagged, excluded from reports, audited.
+
+Residual risk, stated rather than implied: direct database or Docker-daemon access can forge rows or
+rewire networks. Forging consistently requires the job, scope decision, pinned IPs *and* isolation
+record to agree, and the audit hash chain plus resolution history make disagreement visible —
+containment, not elimination. Recorded as assumption **B8**.

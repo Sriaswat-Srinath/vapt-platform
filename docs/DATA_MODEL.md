@@ -202,7 +202,7 @@ finding_observations(finding_id FK, raw_observation_id FK, PRIMARY KEY(both))
 
 evidence(id, finding_id FK, kind evidence_kind, label,
          content_redacted text NULL, content_sha256,
-         blob_path NULL, media_type,
+         blob_path NULL, media_type,          -- blob_path REPLACED by blob_id, see §11.5
          raw_observation_id FK NULL, collected_at, collected_by actor_kind)
 
 validation_events(id, finding_id FK, at,
@@ -263,6 +263,7 @@ reports(id, asset_id FK, state report_state, title,
 report_sections(id, report_id FK, seq, key, heading, body_md, data jsonb)
 report_artifacts(id, report_id FK, format enum[html|pdf|json|md],
                  blob_path, sha256, bytes, created_at)
+  -- blob_path REPLACED by artifact_blob_id FK evidence_blobs, see §11.5
 ```
 
 ## 9. Indexing and retention
@@ -430,7 +431,9 @@ retention_run_items(id, run_id FK, target_kind enum[blob|evidence_row|raw_observ
                     UNIQUE(run_id, target_kind, target_id))
 ```
 The plan is committed before any destructive step; steps are idempotent and keyed by item, so
-resumption is safe. An item failing twice ⇒ `failed`, reported, run completes without it.
+resumption is safe. An item failing twice ⇒ `failed` and reported, and it sets
+`retention_state.halted` (§12.2), which blocks any new destructive run until an audited admin
+acknowledgement — see ADR-0011 R3 §12.5.
 
 ### 11.7 Report evidence pinning (ADR-0011 R2 §9)
 ```
@@ -467,3 +470,92 @@ database.**
   `restoration_state` and `grant_document_state` are new native enums created in the M3/M6 migrations.
 - The `scope_grants` CHECK and the partial unique index on `scanner_daemon_leases` are the two
   database-level enforcement points added this round; both are covered by migration tests.
+
+---
+
+## 12. Schema proposal R3 (2026-11-12)
+
+### 12.1 New enum values
+```
+blob_state           += (unchanged: present | pending_delete | purged | missing)
+retention_item_state += intent_committed        -- the committed-intent crossing point
+job_stop_reason       : ok | budget_exhausted | cancelled | grant_revoked
+                      | approval_invalidated | daemon_unavailable
+                      | teardown_unconfirmed | cancel_unconfirmed | error
+```
+`retention_item_state` is now
+`planned | intent_committed | unlinked | row_nulled | done | skipped_pinned | skipped_referenced | failed`.
+
+### 12.2 Retention halt (ADR-0011 R3 §12.5)
+```
+retention_state(id smallint PK CHECK (id = 1),        -- singleton
+                halted bool default false, halted_at, halted_reason,
+                offending_run_id FK retention_runs NULL,
+                offending_item_ids uuid[],
+                acknowledged_at, acknowledged_by FK analysts, acknowledgement_note)
+```
+While `halted`, no new destructive run may start; planning and dry-run remain permitted.
+
+### 12.3 Provenance and identity immutability (ADR-0011 R3 §13)
+```
+raw_observations += observed_peer_ip inet, observed_host, observed_port,
+                    ingestion_verified_at
+
+ingestion_rejections(id, at, job_id FK NULL, asset_id FK NULL,
+                     reason enum[peer_ip_not_pinned|host_mismatch|port_mismatch
+                                |no_job|out_of_scope_url|chain_invalid],
+                     observed_peer_ip inet, observed_host, observed_port,
+                     payload_sha256, trace_id)
+  -- rejected observations are recorded here, never in raw_observations
+
+provenance_verifications(id, started_at, finished_at, rows_checked,
+                         violations int, violation_ids uuid[], detail jsonb)
+
+findings += quarantined_at, quarantine_reason     -- excluded from reports while set
+```
+Triggers: `BEFORE UPDATE ON assets` rejects any change to `environment`, `hostname`, `protocol`,
+`port`. `BEFORE INSERT OR UPDATE ON evidence` and `report_artifacts` reject a blob reference whose
+`evidence_blobs.state <> 'present'` — this is what makes the S1 reference recount durable across the
+filesystem step.
+
+### 12.4 Coverage completeness (ADR-0008 R3 §13)
+```
+scan_jobs        += coverage_complete bool default false
+discovery_runs   += coverage_complete bool default false
+findings         += coverage_complete bool            -- copied from the producing job
+validation_events: rule_inputs jsonb carries {"coverage_complete": bool,
+                                              "reason": "incomplete_coverage"} when suppressed
+```
+
+### 12.5 Daemon identity and reset (ADR-0008 R3 §9–12)
+```
+scanner_daemon_state += instance_marker, instance_marker_set_at,
+                        observed_version, observed_session_name,
+                        requires_operator_restart bool default false,
+                        last_reset_outcome jsonb        -- per-step R2..R7 results
+
+scanner_resets(id, at, requested_by FK analysts, adapter_name,
+               steps jsonb,                  -- ordered [{step, pass, detail}]
+               cleared_dirty bool, failing_step, trace_id)
+```
+`cleared_dirty` is true only when every step passed. No column, parameter or configuration can set it
+otherwise.
+
+### 12.6 Redaction key provenance (ADR-0010 R3)
+```
+agent_tool_calls += hmac_alg                      -- e.g. 'HMAC-SHA256'
+redaction_key_state(id smallint PK CHECK (id = 1), -- singleton
+                    key_id, kcv, first_seen_at, last_seen_at,
+                    rotation_detected_at, mismatch_detected_at)
+```
+`kcv = HMAC(key, REDACTION_KCV_LABEL)` — reveals nothing about the key. **The key itself is never
+stored in any table.** A changed `kcv` under an unchanged `key_id` disables the agent until corrected.
+
+### 12.7 Migration notes
+- `retention_state`, `redaction_key_state` and `scanner_daemon_state` are singleton tables created
+  seeded in their respective migrations (M6, M8, M5).
+- The three triggers (asset identity immutability, blob-state reference guard, and the
+  `validation_events` agent rejection CHECK from §6) are the database-level enforcement points; each
+  has a migration test asserting the rejection, not merely the trigger's existence.
+- `job_stop_reason` replaces free-text `stop_reason` with a native enum so reports and invariant tests
+  can assert on it.

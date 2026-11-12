@@ -149,3 +149,34 @@ Enumerated and closed, each with a test:
 − One more secret to manage (`REDACTION_HMAC_KEY`); losing it loses historical correlation only.
 − Structural parsing of hostile input needs resource limits (depth, size, entity expansion); these are
   configured and tested, and a parser failure falls back to whole-value redaction, never passthrough.
+
+---
+
+## Amendment R3 (2026-11-12) — HMAC key management
+
+1. **Key material exists only in environment-provided secrets.** `REDACTION_HMAC_KEY_ENV` names the
+   variable; the value is loaded once into a `SecretBytes` whose `__repr__`, `__str__` and
+   `__format__` return `<redacted>`. It is never written to the database, never to a file, never to an
+   artifact.
+2. **Every reference records key id and algorithm version.** The marker is `ref=hmac:v1:…`;
+   `agent_tool_calls` persists `redaction_key_id`, `redaction_version` and an explicit
+   `hmac_alg = 'HMAC-SHA256'`, so a future algorithm change is recorded rather than inferred.
+3. **Old keys are not retained to preserve historical correlation.** No key history is stored
+   anywhere. Rotation replaces the environment value; pre-rotation refs stop matching, and that loss
+   is accepted — preserving correlation would require retaining the secrets.
+4. **Rotation is audited**, and a silent rotation is detected. A **key check value**,
+   `KCV = HMAC(key, "vapt-kcv")` (which reveals nothing about the key), is recorded; a changed KCV
+   under an unchanged `REDACTION_KEY_ID` is caught at startup, audited as a misconfiguration, and
+   **the agent is disabled until the id is corrected** — otherwise refs would silently stop
+   correlating while claiming the same id.
+5. **Rotation never changes evidence-integrity hashes.** `content_sha256` and `redacted_sha256` are
+   unkeyed SHA-256 computed in `evidence/integrity.py`, which takes no key input. Property test:
+   rotate the key, re-verify every integrity hash unchanged.
+
+**Confirmed: the key cannot appear in application logs, configuration dumps, exception messages or
+agent prompts**, by four independent means — the `SecretBytes` type (an accidental interpolation
+prints `<redacted>`); a structlog processor that scrubs the key's byte value from any log payload by
+identity; config-introspection paths (`/system/capabilities` included) emitting the key **id** only;
+and registration of the live key value as a **mandatory canary** in the stage-2 redactor, so if it
+ever appears in an outbound payload it is redacted *and* an alert is raised. CI asserts the value
+appears in no log line, no API response, no prompt and no traceback (invariant **I11**).

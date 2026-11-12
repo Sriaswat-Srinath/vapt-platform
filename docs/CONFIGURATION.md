@@ -178,7 +178,7 @@ to the database and never sent to the provider.
 | `RETENTION_SCHEDULE_CRON` | `0 3 * * *` | |
 | `RETENTION_DRY_RUN` | `true` | first-run default: plan and report, delete nothing |
 | `RETENTION_MAX_ITEMS_PER_RUN` | `5000` | bounds blast radius |
-| `RETENTION_ITEM_MAX_ATTEMPTS` | `2` | then `failed` + reported; the run completes without it |
+| `RETENTION_ITEM_MAX_ATTEMPTS` | `2` | then `failed` + reported, **and `retention_state.halted` is set**, blocking new destructive runs until an audited admin acknowledgement (ADR-0011 R3 §12.5) |
 | `RETENTION_AUTO_RESUME_INTERRUPTED` | `true` | a half-finished purge is not a state to sit in; resumption is audited |
 | `RETENTION_PIN_BLOBS_FOR_REPORTS` | `false` | reports pin redacted evidence only, so report generation does not extend secret lifetime |
 | `EVIDENCE_ENCRYPTION_MODE` | `none` | the only accepted MVP value; reported verbatim by `/system/capabilities` as `none (host FDE assumed, unverified)` |
@@ -200,3 +200,68 @@ to the database and never sent to the provider.
     refuse to start.
 12. Any `scope_grants` row in `active` whose `document_state != 'signed_verified'` ⇒ refuse to start
     (indicates out-of-band tampering with the grant table).
+
+---
+
+## R3 additions (2026-11-12)
+
+No existing default is changed by this round; every entry below is new.
+
+### Cancellation and scanner API bounds (ADR-0008 R3 §14)
+
+| Variable | Default | Notes |
+|---|---|---|
+| `CANCEL_CHECK_INTERVAL_SECONDS` | `2` | cancellation checkpoint cadence: every poll tick, between collection pages, between phases |
+| `ZAP_API_CALL_TIMEOUT_SECONDS` | `10` | per-call bound for `stopScan`, `removeContext`, `newSession` |
+| `CANCELLATION_SLA_SECONDS` | `120` | hard ceiling on revocation/cancel → terminal state; exceeding it ⇒ `cancel_unconfirmed` + dirty daemon + alert (invariant I13) |
+
+### Scanner reset and operator escalation (ADR-0008 R3 §9–11)
+
+| Variable | Default | Notes |
+|---|---|---|
+| `SCANNER_RESET_REQUIRES_VERIFICATION` | `true` | **not disableable** — a `false` value is rejected at startup. The dirty flag never clears without steps R2–R7 all succeeding |
+| `SCANNER_RESET_PROBE_TIMEOUT_SECONDS` | `30` | bound for the health/identity/probe steps |
+| `SCANNER_ALLOW_CONTAINER_CONTROL` | `false` | **not settable to `true`** — rejected at startup. Documents that the platform has no container-control capability (no Docker socket) and must not acquire one |
+
+There is no setting that force-clears a dirty daemon, and none that grants container control.
+
+### Coverage and validation soundness (ADR-0008 R3 §13)
+
+| Variable | Default | Notes |
+|---|---|---|
+| `SUPPRESS_NEGATIVE_EVIDENCE_ON_PARTIAL_COVERAGE` | `true` | **not disableable** — rejected at startup if `false`. Negative-evidence rules cannot confirm when `coverage_complete=false` |
+
+### Evidence provenance (ADR-0011 R3 §13)
+
+| Variable | Default | Notes |
+|---|---|---|
+| `INGESTION_ENFORCE_PINNED_PEER` | `true` | **not disableable**; observations whose peer IP ∉ `pinned_ips` or whose host/port differ from the registered asset are rejected and audited |
+| `PROVENANCE_VERIFY_SCHEDULE_CRON` | `30 3 * * *` | chain-integrity sweep |
+| `PROVENANCE_QUARANTINE_ON_VIOLATION` | `true` | **not disableable**; violating findings are flagged and excluded from reports |
+
+### Retention halt (ADR-0011 R3 §12.5)
+
+| Variable | Default | Notes |
+|---|---|---|
+| `RETENTION_HALT_ON_INCONSISTENCY` | `true` | **not disableable**; a failed item or unexpectedly missing blob blocks new destructive runs |
+| `RETENTION_FSYNC_AFTER_UNLINK` | `true` | **not disableable**; without it a crash could resurrect a file the database calls purged |
+| `RETENTION_VERIFY_BLOB_IDENTITY` | `true` | **not disableable**; pre-unlink `lstat`/real-path/size checks — the platform refuses to delete a file it cannot positively identify |
+
+### Redaction key management (ADR-0010 R3)
+
+| Variable | Default | Notes |
+|---|---|---|
+| `REDACTION_KCV_LABEL` | `vapt-kcv` | key check value input; a changed KCV under an unchanged `REDACTION_KEY_ID` is a startup misconfiguration |
+| `REDACTION_DISABLE_AGENT_ON_KCV_MISMATCH` | `true` | **not disableable**; the agent is disabled until the key id is corrected |
+
+### Startup validations added this round
+
+13. `SCANNER_RESET_REQUIRES_VERIFICATION=false`, `SCANNER_ALLOW_CONTAINER_CONTROL=true`,
+    `SUPPRESS_NEGATIVE_EVIDENCE_ON_PARTIAL_COVERAGE=false`, `INGESTION_ENFORCE_PINNED_PEER=false`,
+    `PROVENANCE_QUARANTINE_ON_VIOLATION=false`, `RETENTION_HALT_ON_INCONSISTENCY=false`,
+    `RETENTION_FSYNC_AFTER_UNLINK=false`, `RETENTION_VERIFY_BLOB_IDENTITY=false` or
+    `REDACTION_DISABLE_AGENT_ON_KCV_MISMATCH=false` ⇒ **refuse to start**.
+14. `CANCELLATION_SLA_SECONDS` below the sum of the step bounds ⇒ refuse to start (an unreachable SLA
+    is a misconfiguration, not a tighter guarantee).
+15. KCV mismatch under an unchanged `REDACTION_KEY_ID` ⇒ agent disabled, audited.
+16. `retention_state.halted = true` at startup ⇒ destructive retention runs refused until acknowledged.

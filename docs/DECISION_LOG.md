@@ -53,7 +53,7 @@ the new lifecycle documents.
 | R2-2 | MVP: one active ZAP job globally; one context per job; global lease held across the **complete** session lifecycle; per-asset controls retained as a narrower budget control | ADR-0008 R2 §1–4; `ZAP_MAX_CONCURRENT_JOBS=1` clamped in code |
 | R2-3 | Any unconfirmed teardown marks the daemon dirty; dirty state blocks **all** subsequent scanner jobs until an audited admin reset | ADR-0008 R2 §5–7; new preflight **gate 13** |
 | R2-4 | No concurrent ZAP sessions until isolation is demonstrated by dedicated tests; raising the limit needs a superseding ADR, not a config change | ADR-0008 R2 §8; `SCANNER_LIFECYCLE.md` §6 |
-| R2-5 | Approvals are **invalidated** when an identity is revoked, deactivated or loses attestation; dependent in-flight jobs stop at the next phase boundary; invalidation is not reversed by re-activation | ADR-0009 R2 §7; `approval_state += invalidated`; `identity_events` |
+| R2-5 | Approvals are **invalidated** when an identity is revoked, deactivated or loses attestation; dependent in-flight jobs stop at the next cancellation checkpoint, bounded by `CANCELLATION_SLA_SECONDS` (R3-5); invalidation is not reversed by re-activation | ADR-0009 R2 §7; `approval_state += invalidated`; `identity_events` |
 | R2-6 | Configuration cannot bypass startup verification: `DUAL_CONTROL_AVAILABLE` is an input, the effective value is **computed** at startup *and* at every gate 7 evaluation; no column, flag or field can set it directly | ADR-0009 R2 §8; `CONFIGURATION.md` §R2 |
 | R2-7 | Five-case identity test matrix; only two distinct, active, attested identities may satisfy the precondition, and **all other gates still apply** | ADR-0009 R2 §9 |
 | R2-8 | Redaction coverage across JSON (incl. nested arrays), URL query parameters, HTML forms, multipart, XML, exception messages, tool errors and stack traces, and recognisable encoded credentials | ADR-0010 R2 §9; `REDACTION_DATAFLOW.md` §7 |
@@ -75,3 +75,21 @@ the new lifecycle documents.
   redacted evidence only.
 - **Purge is final:** no restoration capability exists in the MVP; the request flow exists so that
   any future restoration is controlled, verified and audited rather than ad hoc.
+
+---
+
+## Round 3 — clarifications accepted 2026-11-12
+
+D13–D18 approved with the proposed defaults. The expanded invariant suite **I1–I14** and the
+**invariant manifest test** are approved and specified in [INVARIANTS.md](INVARIANTS.md).
+
+| Ref | Clarification | Where implemented |
+|---|---|---|
+| R3-1 | Synthetic-only enforcement must rest on asset provenance and ingestion controls, not a database label | ADR-0011 R3 §13; `SAFETY.md` §8.1; `DATA_MODEL.md` §12.3; assumptions A19–A20, **B8** |
+| R3-2 | Purge must distinguish PostgreSQL transactions from filesystem operations, which cannot be atomic together: committed-intent state machine, locking, reference recount, unlink verification, database update, crash recovery | ADR-0011 R3 §12–12.5; `EVIDENCE_LIFECYCLE.md` §4; `SAFETY.md` §8.5; A21 |
+| R3-3 | An unresolved purge inconsistency must block further deletion (corrects the R2 "run completes without it" wording) | `retention_state.halted`; `RETENTION_HALT_ON_INCONSISTENCY` not disableable; invariant I12 |
+| R3-4 | HMAC key management: env-only key material, key id + algorithm recorded per ref, no key retention for correlation, audited rotation, integrity hashes unaffected; key must not appear in logs, config dumps, exceptions or prompts | ADR-0010 R3; `redaction_key_state` (KCV only, never the key); invariant I11; A25 |
+| R3-5 | Bounded cancellation latency with a defined maximum, not an indefinite wait for a phase to finish | ADR-0008 R3 §14; `CANCELLATION_SLA_SECONDS=120`; invariant I13; A24 |
+| R3-6 | ZAP daemon crash: fail the job, mark dirty, verify what can be verified, require reset, preserve partial observations without confirming incomplete findings | ADR-0008 R3 §12–13; `coverage_complete`; A23, **B9** |
+| R3-7 | The application cannot restart Docker containers (socket prohibited); the reset endpoint must verify daemon identity and health and must not clear the dirty flag without successful verification; the operator-performed restart must be documented | ADR-0008 R3 §9–11; `SAFETY.md` §8.2; `scanner_resets`; `CONFIGURATION.md` R3; A22; limitation 18 |
+| R3-8 | M1 boundary confirmed: builds and proves the lab; no production or active scanning, no real infrastructure, no signed authorisation, no full application; completable with scanner execution disabled | `M1_ACCEPTANCE.md` §5–6 |

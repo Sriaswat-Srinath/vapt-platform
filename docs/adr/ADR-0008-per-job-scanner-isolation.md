@@ -117,3 +117,103 @@ Denials are persisted in the `ScopeDecision` like any other gate.
   trusting unverified daemon state.
 − Two locks now exist (global daemon, per-asset). Their distinct purposes are documented in
   `SCANNER_LIFECYCLE.md` so the narrower one is never mistaken for the isolation control again.
+
+---
+
+## Amendment R3 (2026-11-12) — daemon crash handling, reset limits, bounded cancellation
+
+### 9. The application cannot restart containers — and must not pretend to
+
+Docker socket access is **permanently prohibited** (§6, and the brief's hard requirement). The
+platform therefore has **no capability to start, stop, restart or recreate the ZAP container**, and no
+code path attempts it. Every recovery mechanism below operates *inside* a running daemon over its
+REST API, or else escalates to the operator.
+
+The lab compose sets ZAP **`restart: "no"`** deliberately: a crashed daemon must stay down rather than
+silently returning with a fresh, empty, healthy-looking session mid-job, which would be
+indistinguishable from a correctly torn-down daemon and would corrupt evidence integrity.
+
+### 10. `POST /system/scanner/reset` — verification-gated, never a blanket clear
+
+Reset is an **in-daemon re-initialisation**, not a process restart. Ordered procedure, all inside the
+global daemon lease:
+
+```
+R1 acquire global daemon lease (fails fast if a live lease is held)
+R2 health:    GET /JSON/core/view/version              → unreachable ⇒ STOP
+R3 identity:  read the instance marker context; compare recorded version + marker
+R4 newSession (clean)
+R5 assert stores empty: alerts == 0, sites == [], messages == 0
+R6 probe:     create a throwaway context, read it back, remove it   (API actually works)
+R7 re-read version; write a NEW instance marker; record it
+R8 only if R2–R7 ALL succeeded: is_dirty = false, last_reset_at/by set
+R9 audit the whole sequence, step by step, pass or fail; release the lease
+```
+
+**The dirty flag is never cleared without successful verification.** Any failing step leaves
+`is_dirty = true`, updates `dirty_reason`, and records the failing step. There is no force parameter,
+no configuration override and no automatic expiry of the dirty flag. Reset also changes no flag,
+grant, approval or profile — it cannot be used as a scanning bypass.
+
+When R2 fails (daemon unreachable) or R3 shows an identity mismatch the platform cannot fix it from
+inside, so it sets `requires_operator_restart = true` and returns `503` naming the operator action.
+
+### 11. Operator-performed container restart (the documented escalation)
+
+Required whenever the daemon is unreachable, its identity has changed, or reset fails at R2/R3. Run
+**from the operator's own shell, outside the application**:
+
+```bash
+make lab-zap-restart   # docker compose -f docker-compose.lab.yml restart zap
+make lab-check         # re-verify isolation before anything else
+```
+
+Then call `POST /system/scanner/reset` to verify and clear the dirty flag. Until both succeed, gate 13
+denies every job requiring the exclusive daemon, on every asset and profile. `lab/README.md` carries
+this runbook, including the note that `restart: "no"` means the container will not come back on its
+own, by design.
+
+### 12. Daemon crash: what the reconciler does
+
+| Question | Behaviour |
+|---|---|
+| Mark the active job failed? | Yes — `failed`, `stop_reason='daemon_unavailable'`. **Never `completed`** |
+| Mark the daemon dirty? | Yes, immediately; gate 13 then blocks every asset and profile |
+| Verify the old process is gone? | **Not at OS level, and this is not claimed.** Process liveness needs the Docker socket, which is forbidden. What is verified is **daemon identity and state**: an instance-marker context plus recorded version and session name, written on acquisition. A lease that existed while the marker is now absent, or a changed version/session, means the daemon restarted ⇒ dirty. `restart: "no"` prevents a silent auto-restart from masking this. Recorded as assumption **B9** |
+| Require a reset before another job? | Yes — verification-gated reset (§10) only; plus an operator restart where §11 applies |
+| Preserve partial observations? | Yes. Already-written `raw_observations` are immutable and retained; the job records `coverage_complete = false` |
+| Can incomplete data confirm a finding? | **No.** See §13 |
+
+### 13. Incomplete coverage cannot produce a confirmed finding
+
+Negative evidence is unsound under truncated collection: "header absent across ≥N responses on ≥M
+URLs" means nothing if collection stopped early. Therefore when `coverage_complete = false`
+(daemon crash, cancellation, budget exhaustion, teardown failure):
+
+- **negative-evidence rules are suppressed**, resolving to `inconclusive` with
+  `rule_inputs.reason = 'incomplete_coverage'` instead of `confirmed`;
+- **positive-evidence rules may still confirm** (a payload reflected unencoded is present
+  regardless of how much else was collected);
+- `coverage_complete` is a recorded rule input, so the decision is reproducible;
+- the report marks the scan partial and names the stop reason.
+
+### 14. Bounded cancellation latency (corrects "next phase boundary")
+
+"Next phase boundary" was the wrong unit: ZAP's spider and active phases are long poll loops, so a
+boundary could be minutes away. **The checkpoint is every poll tick**, plus between collection pages
+and between phases. Revocation (grant or approval) sets `cancel_requested_at` in its own transaction,
+so detection latency is one checkpoint.
+
+| Step | Bound | Setting |
+|---|---|---|
+| 1. finish the current bounded operation | ≤ 2 s (ZAP poll tick) / ≤ 15 s (in-flight crawler request) | `CANCEL_CHECK_INTERVAL_SECONDS`, `HTTP_REQUEST_TIMEOUT_SECONDS` |
+| 2. observe cancel/revocation state | same tick | — |
+| 3. `stopScan` | ≤ 10 s | `ZAP_API_CALL_TIMEOUT_SECONDS` |
+| 4. confirm daemon idle | ≤ 60 s | `ZAP_TEARDOWN_IDLE_TIMEOUT_SECONDS` |
+| 5. teardown (`removeContext` → `newSession` → assert empty) | ≤ 25 s | per-call timeouts |
+| 6. mark cancelled | ≤ 1 s | — |
+| **total** | **≤ 113 s worst case; hard ceiling 120 s** | `CANCELLATION_SLA_SECONDS` |
+
+Exceeding the ceiling is not an indefinite wait: `failed`, `stop_reason='cancel_unconfirmed'`, daemon
+dirty, alert raised. Tested deterministically against the mock adapter and wall-clock against real ZAP
+(invariant **I13**).

@@ -84,7 +84,7 @@ substitutions.
 | A11 | At most one ZAP job touches the daemon at a time | global advisory lock + partial unique index (one `held` lease per adapter) + a concurrent-submission test asserting the lease timeline | second job stays `queued`; `newSession` cannot run under another job |
 | A12 | Unproven daemon state is never trusted | stale/unheld lease ⇒ daemon dirty; dirty blocks every job at gate 13; only an audited admin reset clears it | scanning stops platform-wide — the safe direction |
 | A13 | Intrusive authority cannot be granted by configuration | effective dual control is computed at startup **and** at every gate 7 evaluation; five-case test matrix; forbidden config values refused at startup | flag forced false, audited; intrusive stays denied |
-| A14 | An approval does not outlive its identities' qualification | eager invalidation on revoke/deactivate/unattest + live re-evaluation; in-flight jobs cancelled at the next phase boundary | approval `invalidated`; job stops with `approval_invalidated` |
+| A14 | An approval does not outlive its identities' qualification | eager invalidation on revoke/deactivate/unattest + live re-evaluation; in-flight jobs cancelled at the next cancellation checkpoint, bounded by `CANCELLATION_SLA_SECONDS` (A24) | approval `invalidated`; job stops with `approval_invalidated` |
 | A15 | No plain hash of a secret value is ever exposed | keyed HMAC refs only; `LLM_EXPOSE_CONTENT_HASHES=false` not disableable; canary sweep over every tool result, prompt and error | CI fails; merge blocked |
 | A16 | A blob is never unlinked while an active reference exists | FK + `SELECT … FOR UPDATE` with an in-transaction recount + post-unlink assertion; shared-blob and concurrent-reference tests | deletion skipped as `skipped_referenced`; no dangling reference |
 | A17 | An interrupted purge resolves to a known state | plan committed before any destructive step; idempotent per-item steps; unlink-before-row-null so the failure mode is "file gone, row stale" (repairable) not "row purged, secret on disk" (silent failure); startup reconciler | reconciler completes or fails the item, audited |
@@ -112,3 +112,38 @@ substitutions.
 16. **Evidence is not encrypted at application level** (B7 above), stated in every report.
 17. **Scanner execution is currently denied in this repository**, because
     `lab/authorisation/MOCK-WEB-001.md` is an unsigned draft and no grant can be activated from it.
+
+---
+
+## G. R3 additions (2026-11-12)
+
+### G.1 New mechanically verified assumptions
+
+| # | Assumption | Verified by | If false |
+|---|---|---|---|
+| A19 | Evidence can only originate from a registered mock asset | worker-only writes with `raw_observations.job_id NOT NULL`; no import/upload path; ingestion rejects peer IP ∉ `pinned_ips` or host/port mismatch; `GET /system/provenance/verify` walks the full chain | observation rejected and audited; a violating finding is quarantined and excluded from reports (I1, I14) |
+| A20 | Asset identity cannot be relabelled | BEFORE UPDATE trigger on `environment`/`hostname`/`protocol`/`port`; PATCH whitelist excludes them; and relabelling changes nothing because gates 8–10 plus the lab-only route still decide reachability | update rejected; the route still denies a non-lab target (I14) |
+| A21 | A purge never leaves a secret on disk while the database claims it is gone | intent committed before any filesystem change; pre-unlink identity checks; post-unlink absence check; directory `fsync`; row updated only afterwards; crash-recovery matrix replayed at every boundary | the inverse inconsistency is unreachable by construction; the reachable one ("bytes gone, row stale") is detected and repaired, and any unexplained state halts further deletion (I12) |
+| A22 | A dirty daemon cannot be cleared without verification | nine-step reset, all steps must pass; no force parameter, no override, no expiry; `SCANNER_RESET_REQUIRES_VERIFICATION` not disableable | flag stays set; gate 13 keeps denying every job (I8) |
+| A23 | Incomplete coverage cannot produce a confirmed finding | negative-evidence rules suppressed when `coverage_complete=false`; `coverage_complete` recorded as a rule input | finding resolves `inconclusive` with `reason='incomplete_coverage'` |
+| A24 | Cancellation terminates within a bounded time | per-step timeouts summing below `CANCELLATION_SLA_SECONDS`; startup refuses an unreachable SLA | `cancel_unconfirmed` + dirty daemon + alert — never an indefinite wait (I13) |
+| A25 | The HMAC key never leaves the api process | `SecretBytes` type, log scrubber, id-only config introspection, key registered as a mandatory redactor canary; never persisted | CI fails; the canary redacts and alerts (I11) |
+
+### G.2 New assumptions trusted by necessity
+
+| # | Assumption | Residual risk | Containment |
+|---|---|---|---|
+| **B8** | **Direct database and Docker-daemon access are not misused** | An actor with DB access can forge rows (including an `environment` label) or rewire networks, so the synthetic-only property cannot be *proven* against an insider with that access | Forgery must be **consistent across** the job, scope decision, pinned IPs, resolution history and the covering isolation record; the append-only audit hash chain (`/audit/verify`) and `asset_resolutions` history make disagreement visible; `environment` is immutable through the application; the lab-only route means no real target was ever reachable from the worker. **Containment, not elimination** |
+| **B9** | **ZAP process death cannot be verified at OS level** | Verifying process liveness needs the Docker socket, which is permanently prohibited, so "the old daemon is gone" is inferred from daemon identity and state rather than observed | Instance-marker context + recorded version/session; any absence or mismatch ⇒ dirty; `restart: "no"` prevents a silent auto-restart presenting a deceptively clean session; recovery requires a verification-gated reset and, where applicable, an explicit operator container restart |
+
+### G.3 Additions to the accepted limitations (§C)
+
+18. **The platform cannot restart its own scanner container.** Recovery from a daemon crash requires
+    an operator-performed `make lab-zap-restart` followed by `make lab-check` and a verification-gated
+    reset. This is a deliberate consequence of prohibiting Docker socket access.
+19. **Synthetic-only cannot be proven against privileged insiders** (B8); it is enforced by route and
+    ingestion controls, and inconsistency is made detectable.
+20. **Process liveness is not verified** (B9); daemon identity and state are.
+21. **A halted retention state blocks all further deletion** until an admin acknowledges — evidence
+    may therefore persist beyond its retention window while an inconsistency is unresolved. Chosen
+    deliberately over continuing to delete past an unexplained state.

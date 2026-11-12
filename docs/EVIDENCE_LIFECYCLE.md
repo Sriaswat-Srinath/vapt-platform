@@ -50,44 +50,84 @@ Candidates by policy (defaults in `CONFIGURATION.md`): raw blobs > `RETENTION_RA
 redacted evidence > `RETENTION_REDACTED_EVIDENCE_DAYS` (365) · raw observation payloads >
 `RETENTION_RAW_OBSERVATION_DAYS` (365). Audit is **never** purged.
 
-### 4.2 Per-blob deletion protocol
+### 4.2 Two systems that cannot be atomic together
+
+**PostgreSQL transactions and filesystem operations cannot be made atomic.** There is no two-phase
+commit between them: a transaction cannot roll back an unlink, and an unlink cannot be undone when a
+transaction aborts. Atomicity is therefore **not attempted**. Instead intent is committed to the
+database before any filesystem change, and the ordering guarantees that the only reachable
+inconsistency is the safe, detectable one. Each step touches exactly one system:
+
+| Step | System | Operation |
+|---|---|---|
+| **S0** | DB tx | plan the run: one `retention_run_items` row per candidate, `state='planned'` |
+| **S1** | DB tx | `FOR UPDATE` on the blob row → **recount active references by query** → if > 0 stop (`skipped_referenced`/`skipped_pinned`); else `blob.state='pending_delete'`, `item.state='intent_committed'`, `attempts += 1` |
+| **S2** | filesystem | pre-unlink identity checks → `unlink` → verify absence → `fsync` the directory |
+| **S3** | DB tx | re-assert recount == 0 → `blob.state='purged'`, `purged_at`; `evidence.blob_purged_at`; `item` → `row_nulled` → `done` |
+| **S4** | DB tx | run counts; set `retention_state.halted` on any `failed` item or unexpectedly `missing` blob |
+
+S1 is the crossing point: **after it commits, an absent file is expected.** Before it, an absent file
+is an unexplained loss.
+
 ```
-BEGIN
-  SELECT … FROM evidence_blobs WHERE id=:b FOR UPDATE          -- serialise against new references
-  recount active references (computed, never a cached counter):
-      evidence rows with blob_id=:b AND blob_purged_at IS NULL
-    + unreleased evidence_pins with pins_blob=true on those rows
-  IF count > 0 → item state 'skipped_pinned' / 'skipped_referenced'; COMMIT; next item
-  state := 'pending_delete'
-COMMIT
-unlink(storage_path)            -- idempotent: absent file is success
-  item state := 'unlinked'
-BEGIN
-  re-assert count == 0 ; evidence_blobs.state := 'purged', purged_at := now
-  evidence.blob_purged_at := now for the referencing rows
-  item state := 'row_nulled' → 'done'
-COMMIT
+planned ──S1──▶ intent_committed ──S2──▶ unlinked ──S3──▶ row_nulled ──▶ done
+   │                   │                     │
+   │                   │                     └─ file still present ⇒ failed + HALT
+   │                   └─ identity check fails ⇒ failed + HALT (never unlink)
+   └─ active reference ⇒ skipped_referenced | skipped_pinned (terminal, not an error)
 ```
-**A blob is never unlinked while an active reference exists** — three independent guards: the FK, the
-`FOR UPDATE` row lock with an in-transaction recount, and the post-unlink re-assertion.
+
+**Locking and recount durability.** The recount is computed by query inside S1 under `FOR UPDATE` —
+never cached, never only at planning time, and re-run on **every** attempt. A trigger rejects any new
+`evidence.blob_id` or `report_artifacts.artifact_blob_id` referencing a blob whose `state <> 'present'`,
+which is what makes S1's count durable across S2 so S3's re-assertion cannot fail spuriously.
+
+**Unlink verification (S2).** Before: `lstat` (must not be a symlink), resolved real path under
+`EVIDENCE_BLOB_ROOT`, path matches the content-addressed layout for `content_sha256`, and
+`st_size == byte_size`. Any mismatch ⇒ `failed` + halt **without unlinking** — the platform refuses to
+delete a file it cannot positively identify. After: `stat` must raise `ENOENT` (a still-present file ⇒
+`failed` + halt), and the containing directory is `fsync`ed so the deletion survives power loss —
+without that fsync a crash could resurrect a file the database calls `purged`. `ENOENT` from the
+unlink itself is success (idempotent).
+
+**A blob is never unlinked while an active reference exists** — the FK, the `FOR UPDATE` recount, the
+reference-guard trigger and the post-unlink assertion are four independent guards.
 
 ### 4.3 Ordering is chosen for a safe failure mode
-Unlink **before** nulling the DB reference. A crash between the two leaves *"the row references a
-file that is gone"* — detectable and repairable. The reverse order would leave *"the row says purged
-while the secret is still on disk"* — a silent retention failure. Correctness of the secret-removal
-guarantee beats bookkeeping tidiness.
+Unlink **before** nulling the DB reference. A crash between them leaves *"the row references a file
+that is gone"* — detectable and repairable. The reverse order would leave *"the row says purged while
+the secret is still on disk"*, a silent retention failure, and S3-after-verified-unlink makes it
+unreachable. Correctness of the secret-removal guarantee beats bookkeeping tidiness.
 
 ### 4.4 Interrupted-purge recovery
+
+| Crash point | Observed | Interpretation | Recovery |
+|---|---|---|---|
+| after S0 | items `planned` | plan intact | resume from S1 |
+| between S1 and S2 | `pending_delete`, file present | intent committed, unlink not done | re-run S2, then S3 |
+| during S2 | `pending_delete`, indeterminate | unlink done or not | re-run S2 (`ENOENT` ⇒ success), verify, then S3 |
+| between S2 and S3 | `pending_delete`, file absent | **the expected inconsistency** | re-run S3; row ends `purged` |
+| after S3 | `purged`, file absent | complete | mark `done` if not already |
+| any | `present`, file absent, **no intent** | unexpected loss | `state='missing'`, integrity alert, **halt**; never recorded as a purge |
+
 Every step is idempotent and keyed by `(run_id, target_kind, target_id)`. A worker-startup reconciler
-finds `running` runs with a stale lease, marks them `interrupted`, and resumes item by item, audited.
-Auto-resume is deliberate — a half-finished purge is not a state to sit in. An item failing twice is
-marked `failed` and reported; the run completes without it rather than blocking indefinitely.
+marks `running` runs with a stale lease as `interrupted` and resumes them item by item. Every attempt
+is audited (run, item, prior state, outcome, `actor_kind=system`, trace id); resumption is audited as
+`retention_run_resumed`. Auto-resume is deliberate — a half-finished purge is not a state to sit in.
+
+**Halt on inconsistency.** An item exceeding `RETENTION_ITEM_MAX_ATTEMPTS` is `failed`; any `failed`
+item or unexpectedly `missing` blob sets `retention_state.halted` with the reason and offending ids.
+**While halted, no new destructive run may start** (planning and dry-run still work); the in-flight run
+finishes only items already proven safe. Clearing the halt requires an audited admin acknowledgement
+with a justification. This supersedes the earlier "the run completes without it" wording, which would
+have let deletions continue past an unexplained inconsistency.
+
 `pending_delete` blobs are treated as unavailable by readers, so a stuck item is never served.
 `GET /system/retention/runs` exposes run and item state.
 
 ### 4.5 Orphan sweeper
 Reports files with no `evidence_blobs` row, and rows whose file is missing (`state='missing'`). It
-**reports only**; it never deletes autonomously.
+**reports only**; it never deletes autonomously, and a `missing` row halts deletion as above.
 
 ## 5. Restoration
 
@@ -117,9 +157,12 @@ encryption + key management is required before any non-synthetic data is stored 
 ## 7. Test obligations
 
 Shared blob: purging one of two referencing evidence rows must **not** unlink the file · pinned blob
-skipped and counted · kill the worker between unlink and row-null ⇒ reconciler completes the item and
-the row ends purged · kill before any destructive step ⇒ plan resumes with nothing lost · unlink of
-an already-absent file succeeds · reference created concurrently with a purge (row lock serialises;
+skipped and counted · the crash-recovery matrix replayed at **every** boundary (invariant I12) · kill
+the worker between unlink and row-null ⇒ reconciler completes the item and the row ends purged · kill
+before any destructive step ⇒ plan resumes with nothing lost · unlink of an already-absent file
+succeeds · file absent with **no** committed intent ⇒ `missing` + halt, never recorded as a purge ·
+identity-check mismatch ⇒ no unlink + halt · a failed item blocks the next destructive run until
+acknowledged · reference created concurrently with a purge (row lock serialises;
 either skipped or blocked, never a dangling reference) · `analyst` denied raw access, `admin` allowed
 with justification and an audit row · no bulk raw export route exists · retention keeps provenance
 after purge and the finding still renders · orphan sweeper reports without deleting · restoration

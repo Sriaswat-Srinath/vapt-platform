@@ -19,6 +19,9 @@ isolation, including proving the proof can fail.
 | 9 | `.env.example` | lab variables with placeholders; no real secrets |
 | 10 | `lab/README.md` | operator runbook incl. the `.test`-does-not-resolve-on-your-workstation note |
 | 11 | `tests/lab/` | pytest wrappers around the probes so CI asserts the same facts |
+| 12 | `backend/tests/invariants/` | suite skeleton + **manifest test** (I1–I14 with milestone map) and **I4 implemented** — see [INVARIANTS.md](INVARIANTS.md) |
+| 13 | `lab/README.md` §Recovery | the operator-performed container restart runbook (`make lab-zap-restart` → `make lab-check`), and why `restart: "no"` means ZAP stays down after a crash |
+| 14 | `make lab-zap-restart` | operator escalation target; the application itself has **no** container-control capability (no Docker socket) |
 
 ## 2. Functional acceptance criteria
 
@@ -47,13 +50,23 @@ isolation, including proving the proof can fail.
 | I9 | The probe suite writes a machine-readable result (the future `lab_isolation_checks` payload) with `egress_blocked`, `dns_contained`, `passed`, `valid_until` | schema-validated JSON |
 | I10 | **A deliberately induced misconfiguration makes the check FAIL** — a check that cannot fail is not a check | attach a lab container to a bridge network with egress, re-run, assert `passed=false` and the failing probe named; then revert and assert `passed=true` |
 | I11 | A stale result is treated as not-passed | timestamp older than `ISOLATION_CHECK_TTL_MINUTES` ⇒ `passed=false` |
+| I12 | ZAP is configured `restart: "no"`, so a killed daemon stays down | kill the container; assert it does not return; assert `make lab-check` still reports correctly |
+| I13 | No container-control capability exists in the lab definition | no Docker socket bind anywhere in either compose file; grep-level assertion in `tests/lab/` |
+
+## 3a. Invariant acceptance criteria
+
+| # | Criterion | Verification |
+|---|---|---|
+| V1 | **Invariant I4 passes** (no scanner-worker internet access) as an automated test, not only a script | `pytest backend/tests/invariants -k I4` in the lab job |
+| V2 | **The manifest test passes**: all of I1–I14 are present, each skip names a milestone not yet landed, and no invariant is skipped past its milestone | `pytest backend/tests/invariants/test_manifest.py` |
+| V3 | The I4 **failure** direction is proven (induced misconfiguration ⇒ test fails) and then reverted | recorded output of both runs |
 
 ## 4. Documentation acceptance criteria
 
 D1 `lab/README.md` covers bring-up, teardown, reset, the isolation check and how to read its output ·
 D2 the `.test` hostname behaviour (lab-only resolution; use `127.0.0.1:3000` from the workstation; no
 hosts-file entry) is stated explicitly · D3 digests are recorded with the date pinned and the reason ·
-D4 every M1 limitation is listed (below) · D5 `docs/` is updated if reality diverges from the design,
+D4 every M1 limitation is listed (below) · D4a the reset/recovery boundary is documented: the platform cannot restart containers, `POST /system/scanner/reset` (M5) never clears a dirty flag without full verification, and the operator restart path is the escalation · D5 `docs/` is updated if reality diverges from the design,
 rather than the divergence being left undocumented.
 
 ## 5. Explicitly out of scope for M1 — and the standing denial
@@ -77,7 +90,13 @@ rather than the divergence being left undocumented.
    `lab_isolation_checks` row happens in M3.
 4. Juice Shop is deliberately vulnerable; it is disposable and must never be reachable off-host.
 5. No evidence, scan data or report exists yet, so retention, redaction and dual control are
-   unexercised at M1.
+   unexercised at M1; invariants I1–I3 and I5–I14 are therefore skipped with milestone-referenced
+   reasons, which the manifest test permits only until their milestones land.
+6. ZAP is started solely so its isolation can be proven; there is no adapter, queue or API in M1, so
+   no code path can scan. Scanner execution is denied by three independent facts: the implementation
+   does not exist, the flags are false, and no signed authorisation or active grant exists.
+7. The platform cannot restart its own containers (no Docker socket). Daemon recovery is an
+   operator action; M1 documents the runbook but implements no reset endpoint (that is M5).
 
 ## 7. Milestone report (required on completion, per `CLAUDE.md` rule 15)
 

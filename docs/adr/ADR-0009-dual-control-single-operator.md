@@ -59,8 +59,9 @@ triggers `services/dual_control.invalidate_dependents()` in the same transaction
 - every dependent `approvals` row moves to the new state **`invalidated`** with
   `invalidated_at`, `invalidated_reason` and `invalidating_identity_id`;
 - in-flight jobs whose authority derived from such an approval are marked `cancelling` and stop at
-  the next phase boundary with `stop_reason='approval_invalidated'` (bounded, consistent with
-  grant revocation);
+  the next **cancellation checkpoint** with `stop_reason='approval_invalidated'` — bounded by
+  `CANCELLATION_SLA_SECONDS` (120 s ceiling; see ADR-0008 R3 §14, which corrects the looser
+  "next phase boundary" wording), consistent with grant revocation;
 - every invalidation is audit-logged, and the UI surfaces it on the job and the approval.
 
 Invalidation is **not reversible by re-activating the identity**: a fresh approval must be requested
@@ -103,7 +104,7 @@ resolution, port and host allowlists, and daemon availability. Passing case 5 mu
 for, or tested as, "intrusive scanning enabled".
 
 Additional cases: identity revoked **after** approval ⇒ approval `invalidated` and in-flight job
-cancelled at the next phase boundary; attestation withdrawn after approval ⇒ same; attempt to set
+cancelled within the cancellation SLA (ADR-0008 R3 §14); attestation withdrawn after approval ⇒ same; attempt to set
 `DUAL_CONTROL_AVAILABLE=true` with one identity ⇒ forced false and audited; attempt to grant
 intrusive authority by editing a profile, grant or approval row directly ⇒ still denied by live
 re-evaluation.
