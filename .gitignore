@@ -1,0 +1,65 @@
+# --- secrets and environment ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+**/credentials.json
+*api_key*
+*apikey*
+!docs/**
+
+# --- evidence, scanner output, reports (never committed) ---
+evidence/
+blobs/
+var/
+data/
+reports/out/
+*.har
+zap-report.*
+zap-session*
+nuclei-output*
+**/raw_observations/
+*.sqlite
+*.db
+
+# --- database / volumes ---
+pgdata/
+postgres-data/
+redis-data/
+
+# --- python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# --- node / frontend ---
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+npm-debug.log*
+pnpm-debug.log*
+
+# --- tooling / editors / os ---
+.idea/
+.vscode/
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+*.log
+/tmp/
+scratch/
