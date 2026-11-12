@@ -1,5 +1,28 @@
 # Milestone Plan
 
+> **v2 (2026-11-12) — re-sequenced for the reduced MVP** (`MVP_SCOPE.md`). The v1 sequence below is
+> retained for history; **the table here is authoritative.** Gating rules are unchanged.
+
+| v2 | Deliverable | Absorbs from v1 | Status |
+|---|---|---|---|
+| M1 | Isolated local mock lab | M1 | **Accepted** |
+| M1.5 | Network architecture corrections and verification (`M1_5_PLAN.md`) | — | pending approval |
+| M2 | Backend, database, auth + roles, assets, scope rules, **scope grants, approvals, operator identities and the full preflight gate chain**, audit chain, isolation endpoint | M2 + M3 | pending |
+| M3 | ZAP integration and controlled scan execution (global daemon lease, per-job contexts, reset endpoint, raw observations, bounded cancellation) | M5 | pending |
+| M4 | Discovery, attack-surface inventory, **deterministic surface→candidate-test classification** | M4 | pending |
+| M5 | Deterministic validation, evidence blobs/references/pinning, CVSS from catalogue (**no priority formula; no purge runs**) | M6 + part of M7 | pending |
+| M6 | Agentic investigation: redaction boundary, egress proxy use, bounded LangGraph, test-selection proposals, explanations | M8 | pending |
+| M7 | Analyst dashboard (6 screens) and HTML/PDF reporting | M9 + M10 | pending |
+| M8 | Hardening, regression, end-to-end demonstration | M11 | pending |
+
+The gate chain moves into M2 deliberately: M3 cannot execute anything without it, and building ZAP
+integration ahead of the gates would invert the safety order.
+
+---
+
+## v1 sequence (superseded, retained for history)
+
+
 Each milestone delivers implementation + tests + docs and ends with the report required by
 `CLAUDE.md` rule 15 (files changed, commands run, pass/fail, unresolved risks, next milestone).
 Nothing is marked done with a failing or skipped test.

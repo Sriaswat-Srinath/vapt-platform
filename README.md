@@ -1,7 +1,7 @@
 # Agentic Web VAPT Platform
 
 AI-assisted web vulnerability assessment platform for **authorised, locally hosted mock targets
-only**. Current state: **design phase (M0)** — no application code exists yet.
+only**. Current state: **M1 accepted** (isolated lab); M1.5/M2 pending approval. No application code exists yet. Scope: `docs/MVP_SCOPE.md`.
 
 Read `CLAUDE.md` for the engineering rules, then the design set in `docs/`:
 
@@ -27,7 +27,9 @@ Read `CLAUDE.md` for the engineering rules, then the design set in `docs/`:
 | [docs/M1_ACCEPTANCE.md](docs/M1_ACCEPTANCE.md) | M1 scope and acceptance criteria |
 | [docs/M1_REPORT.md](docs/M1_REPORT.md) | M1 results, evidence, deviations D19–D23 and their ratification |
 | [docs/NETWORK_ARCHITECTURE.md](docs/NETWORK_ARCHITECTURE.md) | M1→M2 per-component network access, reachability classes, API egress boundary |
-| [docs/M2_PLAN.md](docs/M2_PLAN.md) | M2 scope, deliverables, acceptance (pending approval) |
+| [docs/MVP_SCOPE.md](docs/MVP_SCOPE.md) | **adopted MVP scope**, build/defer, reconciliation with binding decisions, the open ruling on active tests |
+| [docs/M1_5_PLAN.md](docs/M1_5_PLAN.md) | M1.5 network corrections and verification (pending approval) |
+| [docs/M2_PLAN.md](docs/M2_PLAN.md) | M2 scope, deliverables, acceptance (v2; pending approval) |
 | [lab/README.md](lab/README.md) | lab runbook: bring-up, checks, recovery, forwarder |
 | [docs/adr/](docs/adr/README.md) | ADR-0001 … ADR-0011 (0008–0011 amended R2) |
 | [docs/OPEN_DECISIONS.md](docs/OPEN_DECISIONS.md) | superseded; retained for history |

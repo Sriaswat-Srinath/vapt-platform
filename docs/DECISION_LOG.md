@@ -93,3 +93,20 @@ D13–D18 approved with the proposed defaults. The expanded invariant suite **I1
 | R3-6 | ZAP daemon crash: fail the job, mark dirty, verify what can be verified, require reset, preserve partial observations without confirming incomplete findings | ADR-0008 R3 §12–13; `coverage_complete`; A23, **B9** |
 | R3-7 | The application cannot restart Docker containers (socket prohibited); the reset endpoint must verify daemon identity and health and must not clear the dirty flag without successful verification; the operator-performed restart must be documented | ADR-0008 R3 §9–11; `SAFETY.md` §8.2; `scanner_resets`; `CONFIGURATION.md` R3; A22; limitation 18 |
 | R3-8 | M1 boundary confirmed: builds and proves the lab; no production or active scanning, no real infrastructure, no signed authorisation, no full application; completable with scanner execution disabled | `M1_ACCEPTANCE.md` §5–6 |
+
+---
+
+## Round 4 — MVP re-scope (2026-11-12)
+
+The owner's recommendation (`MVP_SCOPE.md`) is adopted: single asset, single scanner,
+human-supervised, one bounded agent. Milestones re-sequenced (`ROADMAP.md` v2); invariant milestone
+mappings updated accordingly; the 13 milestone-aware skips are unchanged in count.
+
+| Ref | Decision | Status |
+|---|---|---|
+| R4-1 | Defer Nuclei, priority formula, EPSS/KEV, multi-agent, vector DB, k8s, authenticated scanning, extra targets, retention purge runs, restoration flow | adopted; schema retained where evidence integrity depends on it |
+| R4-2 | Adaptive test selection = deterministic surface→candidate matrix (L2) + agent ranking/explanation (L3) + human acceptance + full gate chain | adopted (consistent with ADR-0007) |
+| R4-3 | Preflight gate chain, grants, approvals and identities move into v2 **M2** | adopted |
+| R4-4 | **Active/injection tests in the demonstration** | **OPEN — owner ruling required** (`MVP_SCOPE.md` §4: option A two humans / option B passive-execute + active proposed-and-denied; C refused) |
+| R4-5 | M1.5 network corrections precede M2 | plan written (`M1_5_PLAN.md`), pending approval |
+| R4-6 | D19–D23 ratified with conditions | implemented, commit `9c988ba` |

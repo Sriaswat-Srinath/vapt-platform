@@ -1,6 +1,16 @@
-# M2 Implementation Plan — Backend, database, asset management
+# M2 Implementation Plan — Backend, database, auth, assets, scope **and the gate chain** (ROADMAP v2)
 
-**Not started. Awaiting approval of this plan and of `NETWORK_ARCHITECTURE.md`.**
+**Not started. Awaiting approval; M1.5 precedes it.** Re-scoped per `MVP_SCOPE.md`: v2 M2 absorbs the
+v1 M3 safety controller because M3 (ZAP execution) cannot exist without the gates.
+
+## 0. Added by the re-scope
+| Addition | Acceptance |
+|---|---|
+| `safety/` preflight chain, gates 1–13, pure `ScopeDecision` | the `tests/safety/` matrix (`SAFETY.md` §6, §7.7); property test: total function, no implicit allow |
+| scope grants with `document_state` CHECK, approvals with `invalidated`, `operator_identities`, effective dual control computed at startup and at gate 7 | five-case identity matrix (ADR-0009 R2 §9) — **I3**; grant activation refused while unsigned — **I9** |
+| `scope_decisions` persistence + audit | denial returns 409 with ordered `gate_results` |
+| invariants I1, I2, I3, I9, I14 implemented | manifest flips them to required when M2 lands |
+| LLM provider setting only (`LLM_ENABLED=false`); no provider call in M2 | — |
 
 ## 1. Scope
 In: FastAPI skeleton (config, structured logging, trace ids, RFC 9457 errors), Alembic baseline
