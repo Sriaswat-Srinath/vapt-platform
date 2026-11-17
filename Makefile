@@ -63,3 +63,22 @@ lab-publish:                 ## OPT-IN: loopback forwarder 127.0.0.1:3000 -> lab
 lab-unpublish:               ## stop the loopback forwarder
 	@if [ -f .lab-state/publish.pid ]; then kill $$(cat .lab-state/publish.pid) 2>/dev/null; \
 	  rm -f .lab-state/publish.pid; echo "forwarder stopped"; else echo "not running"; fi
+
+net-subnet-check:            ## refuse app-plane bring-up on a subnet conflict
+	@./scripts/net_subnet_check.sh
+
+net-up: net-subnet-check     ## bring up the M1.5 placeholder app plane
+	@docker compose -f docker-compose.yml up -d
+	@sleep 3; docker compose -f docker-compose.yml ps --format '{{.Name}} {{.State}}'
+
+net-down:                    ## tear down the app plane (incl. the test stand-in)
+	@docker compose -f docker-compose.yml down
+
+net-verify:                  ## run the network architecture verification
+	@./scripts/net_verify.sh
+
+net-prove-failure:           ## prove net_verify FAILS under induced egress, then reverts
+	@./scripts/prove_net_failure.sh
+
+test-net:                    ## pytest wrappers over the network probes
+	@python3 -m pytest tests/net -v

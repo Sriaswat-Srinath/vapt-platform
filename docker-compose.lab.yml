@@ -8,7 +8,13 @@
 #   * restart: "no" on ZAP — a crashed daemon must stay down rather than return
 #     with a deceptively clean session (ADR-0008 R3 §9).
 #   * Juice Shop is published on 127.0.0.1 only, never 0.0.0.0.
-name: vapt
+#
+# PROJECT NAME: the lab is its own compose project (`vapt-lab`), separate from
+# the application plane (`vapt`). This matters: `down --remove-orphans` removes
+# containers that belong to the project but are not in the given file, so a
+# shared project name let `make lab-reset` delete the application plane.
+# Keep these distinct. Asserted by tests/lab/test_lab_recovery.py.
+name: vapt-lab
 
 networks:
   vapt_lab:

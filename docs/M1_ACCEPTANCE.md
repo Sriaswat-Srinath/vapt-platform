@@ -37,6 +37,12 @@ isolation, including proving the proof can fail.
 
 ## 3. Isolation acceptance criteria (the core of M1)
 
+> **Probe-id namespace.** The ids in this section (`I1a`…`I13`, `F1`…`F4c`) are **frozen** so the
+> archived evidence in `docs/evidence/m1/` stays readable. They are *acceptance-criteria probe ids*,
+> not security invariants — invariants live in [INVARIANTS.md](INVARIANTS.md) and are written
+> "invariant I*n*". Two probes added after M1 acceptance were renumbered `PUB-1`/`PUB-2` to remove a
+> collision with invariant I14; M1.5 probes use `NET-*`. See `INVARIANTS.md` §0.
+
 | # | Criterion | Verification |
 |---|---|---|
 | I1 | `vapt_lab` is `internal: true` with no gateway route | `docker network inspect` + no default route in **either** lab container, read from `/proc/net/route` (the images carry no `ip` binary; a probe error counts as failure) |

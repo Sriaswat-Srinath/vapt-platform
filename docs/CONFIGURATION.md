@@ -265,3 +265,37 @@ There is no setting that force-clears a dirty daemon, and none that grants conta
     is a misconfiguration, not a tighter guarantee).
 15. KCV mismatch under an unchanged `REDACTION_KEY_ID` ⇒ agent disabled, audited.
 16. `retention_state.halted = true` at startup ⇒ destructive retention runs refused until acknowledged.
+
+
+---
+
+## M1.5 additions (2026-11-17) — application-plane networks and the egress boundary
+
+No existing default is changed. All values below were measured in M1.5 (`NET-*` probes).
+
+### Networks
+
+| Variable | Default | Notes |
+|---|---|---|
+| `EDGE_SUBNET` | `172.30.20.0/24` | `vapt_edge`, `internal: true` — frontend + api; **the api's HTTP listener binds here only** |
+| `CORE_SUBNET` | `172.30.21.0/24` | `vapt_core`, `internal: true` — api, worker, postgres, redis |
+| `EGRESS_SUBNET` | `172.30.22.0/24` | `vapt_egress`, `internal: true` — api + egress-proxy |
+| `WAN_SUBNET` | `172.30.23.0/24` | `vapt_wan`, **the only network with a route off-host** — egress-proxy only (plus the M1.5 test stand-in) |
+
+`scripts/net_subnet_check.sh` refuses bring-up on any overlap between these, `LAB_SUBNET`, another
+Docker network, or a host route (excluding our own bridges). Verified free on this host 2026-11-17.
+
+### Egress boundary
+
+| Variable | Default | Notes |
+|---|---|---|
+| `EGRESS_ALLOWLIST` | *(none — fail closed)* | exact `host:port` entries. The proxy **refuses to start** when empty. M1.5 test value: `llm-standin:8443`; production: `<provider>:443` |
+| `PROXY_BIND_IP` | `172.30.22.60` | single interface; **never `0.0.0.0`** (`NET-J11`) |
+| `PROXY_PORT` | `3128` | reachable only from `vapt_egress` (i.e. only the api) |
+| `INTERNAL_DENY_CIDRS` | `172.30.20.0/24,172.30.21.0/24,172.30.22.0/24,172.30.10.0/24` | an allowlisted **name** that resolves into an internal subnet is refused |
+| `LLM_PROVIDER_HOST` | *(none)* | M1.5 test value `llm-standin`; **the real provider is never contacted in tests** (`NET-K2`/`K3`/`K4`) |
+| `LLM_PROVIDER_PORT` | `443` | M1.5 test value `8443` (the stand-in runs non-root) |
+
+`HTTPS_PROXY`/`HTTP_PROXY` are set **only** on the api (`NET-C:api-proxy`). The worker and frontend
+carry no proxy, LLM or credential variables (`NET-C:worker`, `NET-C:frontend`), and the proxy carries
+no application credentials (`NET-C:proxy`).

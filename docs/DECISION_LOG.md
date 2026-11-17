@@ -110,3 +110,17 @@ mappings updated accordingly; the 13 milestone-aware skips are unchanged in coun
 | R4-4 | **Active/injection tests in the demonstration** | **OPEN — owner ruling required** (`MVP_SCOPE.md` §4: option A two humans / option B passive-execute + active proposed-and-denied; C refused) |
 | R4-5 | M1.5 network corrections precede M2 | plan written (`M1_5_PLAN.md`), pending approval |
 | R4-6 | D19–D23 ratified with conditions | implemented, commit `9c988ba` |
+
+---
+
+## Round 5 — M1.5 corrections (2026-11-17)
+
+| Ref | Correction | Status |
+|---|---|---|
+| R5-1 | Resolve the `I14` namespace collision; preserve M1 evidence and invariant meanings | done — `PUB-1`/`PUB-2`; `INVARIANTS.md` §0; invariant I14 unchanged; archived evidence untouched |
+| R5-2 | Host-gateway reachability for api/worker/frontend; record `ip_forward`; distinguish gateway from LAN; never claim complete host isolation | done — `NET-HG:*`, `NET-K1`, explicit note in every result |
+| R5-3 | Explicit test-only stand-in LLM configuration; permitted/denied destinations, ports, methods; never contact the real provider | done — `llm-standin:8443`; `NET-J1`…`J6`, `NET-K2`/`K3`/`K4` |
+| R5-4 | Proxy bypass and abuse tests | done — `NET-H1`, `NET-G3`, `NET-I3`, `NET-J7*`/`J8`/`J9*` |
+| R5-5 | Verify attachments, identities, digests, routes, env, ports, socket; api edge binding from the worker | done — `NET-A/B/C/D/E/F*`, `NET-G5` |
+| R5-6 | Topology change: api on internal networks only; proxy dual-homed `vapt_egress`+`vapt_wan` | adopted — supersedes the `enable_ip_masquerade=false` proposal and retires its M2 risk item (ADR-0012 §4.1 amended by measurement) |
+| R5-7 | `NET-J7*`/`J9*` accept `ENETUNREACH \| TIMEOUT`; the proxy's internal-subnet unreachability rests on Docker isolation rules | adopted with assumption **B11** and limitation 25 |

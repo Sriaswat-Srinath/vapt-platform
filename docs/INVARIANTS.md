@@ -7,6 +7,21 @@ An invariant is not a unit test of a function; it is an assertion about the syst
 observable behaviour, written so that a refactor which breaks the property fails CI even if every
 other test still passes.
 
+## 0. Identifier namespaces (resolves the former `I14` collision)
+
+`I14` once named two unrelated things. The namespaces are now distinct, and **no invariant has
+changed meaning**:
+
+| Namespace | Form | Registry | Meaning |
+|---|---|---|---|
+| **Security invariants** | `I1`…`I14` | this file | properties that must hold forever; always written "invariant I*n*" |
+| M1 lab probes (**frozen**) | `I1a`…`I13`, `F1`…`F4c` | [M1_ACCEPTANCE.md](M1_ACCEPTANCE.md) §3 | M1 acceptance criteria; ids frozen so `docs/evidence/m1/` stays readable |
+| Publishing probes | `PUB-1`, `PUB-2` | [M1_5_PLAN.md](M1_5_PLAN.md) §1 | renamed from the post-acceptance `I14`/`I14b`; identical checks |
+| M1.5 network probes | `NET-*` | [M1_5_PLAN.md](M1_5_PLAN.md) §6 | app-plane topology and egress boundary |
+
+Invariant **I14** is, and remains, *asset identity is immutable*. The three archived M1 evidence
+files contain 37 probes and never contained an `I14` probe, so they are unaffected.
+
 ## 1. The invariants
 
 > Milestone column follows **ROADMAP v2** (re-sequenced 2026-11-12).

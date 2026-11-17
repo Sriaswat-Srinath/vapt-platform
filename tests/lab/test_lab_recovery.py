@@ -122,6 +122,31 @@ def test_reset_never_offers_a_force_path():
     assert bogus.returncode != 0, "an undocumented subcommand cleared state"
 
 
+def test_compose_stacks_use_distinct_project_names():
+    """A shared project name let `lab-reset --remove-orphans` delete the whole
+    application plane. The two stacks must stay in separate projects."""
+    import re
+    names = {}
+    for f in ("docker-compose.yml", "docker-compose.lab.yml"):
+        m = re.search(r"(?m)^name:\s*(\S+)", (REPO / f).read_text())
+        assert m, f"{f} declares no project name"
+        names[f] = m.group(1)
+    assert len(set(names.values())) == 2, f"compose projects collide: {names}"
+
+
+def test_lab_reset_does_not_remove_the_application_plane():
+    """Regression: `make lab-reset` must leave the M1.5/M2 app plane running."""
+    app = ["vapt_api", "vapt_worker", "vapt_frontend", "vapt_postgres",
+           "vapt_redis", "vapt_egress_proxy"]
+    before = {c: running(c) for c in app}
+    if not any(v == "true" for v in before.values()):
+        pytest.skip("application plane is not running (make net-up) — nothing to protect")
+    assert sh("make", "lab-reset", timeout=900).returncode == 0
+    after = {c: running(c) for c in app}
+    lost = [c for c in app if before[c] == "true" and after[c] != "true"]
+    assert not lost, f"lab-reset removed application-plane containers: {lost}"
+
+
 def test_lab_reset_cannot_delete_unrelated_developer_data():
     """`make lab-reset` is scoped to compose project `vapt` only."""
     sh("docker", "volume", "create", "devdata_sentinel_vol")

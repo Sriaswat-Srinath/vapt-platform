@@ -187,3 +187,42 @@ substitutions.
 22. `internal: true` provides no host isolation; see H.1.
 23. `/tmp` in the ZAP container is executable (JVM requirement), on a size-capped `nosuid` tmpfs.
 24. Workstation access to the target requires an explicit operator step (`make lab-publish`).
+
+
+---
+
+## I. After M1.5 (2026-11-17) — application plane and egress boundary
+
+### I.1 New verified assumptions
+
+| # | Assumption | Verified by | If false |
+|---|---|---|---|
+| A30 | The api has no route to the internet | `NET-H1` (`ENETUNREACH`), `NET-F:api` (no default route); api is on internal networks only | `net_verify` fails |
+| A31 | The worker cannot reach the internet, the LAN, the egress proxy or the api | `NET-G1`…`NET-G5`, `NET-G7`; induced-failure proof flips `NET-G1`/`NET-G2` | `net_verify` fails |
+| A32 | The api's HTTP listener is bound to its `vapt_edge` address only — proven **from the worker's perspective** | `NET-G5` returns `ECONNREFUSED` from `vapt_core`; `NET-J8` likewise from the proxy | `net_verify` fails |
+| A33 | Outbound traffic is `CONNECT`-only to one exactly-matched `host:port`; every other host, port and method is refused and logged | `NET-J1`…`NET-J6`, `NET-J10`/`J10b`; 48 denials recorded in M1.5 | `net_verify` fails |
+| A34 | The egress proxy cannot reach application or scanner components | `NET-J7*`, `NET-J9*` (blocked), `NET-J8` (no listener) — **note the mechanism in I.2** | `net_verify` fails |
+| A35 | The WAN side cannot use the proxy | `NET-J11` (`ECONNREFUSED`; the proxy binds one interface) | `net_verify` fails |
+| A36 | No real LLM provider is contacted by tests | `NET-K2` (allowlist is the local stand-in only), `NET-K3` (no permitted tunnel elsewhere in the decision log), `NET-K4` (every permitted tunnel resolved to `172.30.23.70`) | `net_verify` fails |
+| A37 | Attachment sets, image digests, environment, publishing and socket absence are as specified | `NET-A:*`, `NET-B:*`, `NET-C:*`, `NET-D:*`, `NET-E:*` | `net_verify` fails |
+
+### I.2 Mechanism distinction (recorded, not glossed)
+
+The egress proxy **must** have a default route. Consequently its packets toward an internal VAPT
+subnet are not rejected with `ENETUNREACH`: they leave via the default route, reach the host (which
+has routes to those bridges, with `ip_forward=1`), and are **silently dropped by Docker's
+inter-network isolation rules** — the observed class is a timeout. The destination is unreachable
+either way, but for the proxy this rests on **iptables rules rather than the absence of a route**.
+Every other component has no default route at all (`NET-F:*`), which is the stronger property.
+Probes `NET-J7*`/`NET-J9*` accept `ENETUNREACH | TIMEOUT` and state the mechanism.
+
+| # | Assumption | Residual risk | Containment |
+|---|---|---|---|
+| B11 | Docker's inter-network isolation rules remain in force on this host | if flushed, the proxy (the only container with a default route) could reach internal subnets via the host | the proxy runs one auditable CONNECT-only program with an exact allowlist, non-root, read-only, `cap_drop: ALL`; `net_verify` re-measures the property and fails if it changes; every other component has no route at all |
+
+### I.3 Additions to the accepted limitations (§C)
+25. The proxy's inability to reach internal subnets rests on Docker's isolation rules, not on absent
+    routing (I.2, B11).
+26. `net.ipv4.ip_forward` is `1` on this host; recorded in every network result rather than relied upon.
+27. M1.5 services are **placeholders**: they prove topology, not application behaviour. No endpoints,
+    no migrations, no authentication, no scanner adapter.

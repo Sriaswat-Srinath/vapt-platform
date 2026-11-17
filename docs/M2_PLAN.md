@@ -46,7 +46,12 @@ compose + networks + egress proxy (with tests first) → config + logging + erro
 auth → assets/scope → grants/approvals/identities → system endpoints → audit verify → invariants.
 
 ## 5. Risks specific to M2
-egress-proxy ACL correctness (tested both directions) · `enable_ip_masquerade=false` behaviour on
-this host (measured, not assumed, before relying on it) · uvicorn single-interface bind in a container
-(fallback: api on `vapt_edge` only with postgres/redis reached through a second internal network the
-worker is not on).
+- egress-proxy ACL correctness — **retired as a risk**: measured in M1.5 (17 `NET-J*` probes, 48
+  logged denials), and the ACL is exercised in both directions.
+- `enable_ip_masquerade=false` behaviour — **retired**: the design no longer uses it. The api is on
+  internal networks only and has no internet route at all (M1.5 `NET-H1`, `NET-F:api`).
+- Single-interface bind — **retired as a risk**: proven in M1.5 from the worker's perspective
+  (`NET-G5` `ECONNREFUSED`) and from the proxy's (`NET-J8`). M2 must configure uvicorn's `--host` to
+  the resolved `vapt_edge` address and keep `NET-G5` green.
+- Remaining: swapping placeholders for the real `postgres:16` / `redis:7` images must preserve every
+  `NET-*` property — `net_verify` is re-run as part of M2 acceptance, not just M1.5.

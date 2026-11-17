@@ -262,3 +262,23 @@ messages      : {"numberOfMessages":"0"}
 Queried from an allowlisted in-lab client after the full test run (which itself starts no scan). Flags `SCANNER_EXECUTION_ENABLED`, `ZAP_ADAPTER_ENABLED`, `ACTIVE_SCAN_ENABLED`, `DUAL_CONTROL_AVAILABLE` are `false` in both `.env` and `.env.example`; `lab/authorisation/MOCK-WEB-001.md` is byte-identical to commit `83497ce`; `scope_grant` is `null` and no grant file is tracked.
 
 Final run after ratification changes: **39/39 probes**, induced failure flips 6 probes and recovers, **69 passed / 13 skipped / 0 failed** (`tests/lab` + `backend/tests/invariants`).
+
+---
+
+## 14. Probe-id namespace correction (M1.5, 2026-11-17)
+
+Two probes added **after** M1 acceptance were numbered `I14`/`I14b`, colliding with security
+invariant **I14** (*asset identity is immutable*). They are renamed:
+
+| Was | Now | Check (unchanged) |
+|---|---|---|
+| `I14` | **`PUB-1`** | no VAPT container publishes on `0.0.0.0` |
+| `I14b` | **`PUB-2`** | host-wide `0.0.0.0` listeners are reported (lab containers reach them via the lab gateway) |
+
+- **No invariant changed meaning.** Invariant I14 is unchanged, as are I1–I13.
+- **No historical evidence changed.** `docs/evidence/m1/evidence-{1,2,3}*.json` each contain 37
+  probes and never contained an `I14` probe.
+- Namespaces are now documented in `INVARIANTS.md` §0: invariants `I1`…`I14`; frozen M1 lab probes
+  `I1a`…`I13`/`F1`…`F4c`; publishing probes `PUB-*`; M1.5 network probes `NET-*`.
+- Re-verified after the rename: the M1 lab check passes **39/39** probes
+  (`isolation_passed=true`, `access_passed=true`), with `PUB-1`/`PUB-2` present and no `I14`.

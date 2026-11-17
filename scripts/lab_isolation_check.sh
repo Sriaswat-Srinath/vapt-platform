@@ -175,13 +175,16 @@ if [ -n "$lanip" ]; then
   add F4c 000 "$lanhttp" "$(pass_fail "$lanhttp" 000)" "LAN interface ${lanip}:${PUBLISH_PORT} must NOT serve the app"
 fi
 
-# === I14 no VAPT container publishes on 0.0.0.0 (D20: containers reach host
-#      services bound on 0.0.0.0 via the lab gateway; a 0.0.0.0 publish of any
-#      VAPT component would also expose it to the LAN) =========================
-wild=$(docker ps --filter "label=com.docker.compose.project=vapt" --format '{{.Names}} {{.Ports}}' 2>/dev/null | grep -c '0\.0\.0\.0:' || true)
-add I14 0 "$wild" "$(pass_fail "$wild" 0)" "vapt containers with a 0.0.0.0 host publish"
+# === PUB-* publishing probes.  NOTE: these were briefly numbered I14/I14b,
+#      which collided with security invariant I14 (asset identity is immutable).
+#      Renamed to the PUB-* namespace; the M1 lab probe ids I1a..I13 / F1..F4c
+#      are frozen so docs/evidence/m1/ stays readable. See docs/INVARIANTS.md §0.
+#      D20: containers reach host services bound on 0.0.0.0 via the lab gateway,
+#      so a 0.0.0.0 publish of a VAPT component would also expose it. ==========
+wild=$(docker ps --filter "name=^vapt" --format '{{.Names}} {{.Ports}}' 2>/dev/null | grep -c '0\.0\.0\.0:' || true)
+add PUB-1 0 "$wild" "$(pass_fail "$wild" 0)" "vapt containers with a 0.0.0.0 host publish"
 hostwild=$(ss -lntH 2>/dev/null | awk '{print $4}' | grep -E '^(0\.0\.0\.0|\*|\[::\]):' | sort -u | tr '\n' ' ')
-add I14b "<none>" "${hostwild:-<none>}" "$([ -z "$hostwild" ] && echo true || echo false)" "host listeners on 0.0.0.0 — reachable from lab containers via ${SUBNET%.*}.1 (D20)"
+add PUB-2 "<none>" "${hostwild:-<none>}" "$([ -z "$hostwild" ] && echo true || echo false)" "host listeners on 0.0.0.0 — reachable from lab containers via ${SUBNET%.*}.1 (D20)"
 
 # === reachability matrix (D20) — observed classes, recorded not judged =======
 # ECONNREFUSED to the gateway proves L3 reachability of the host without a listener;

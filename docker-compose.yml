@@ -1,23 +1,169 @@
-# VAPT application stack.
+# VAPT application stack — M1.5 TOPOLOGY VERIFICATION.
 #
-# M1 declares the two non-lab networks only; services (api, worker, postgres,
-# redis, frontend) land in M2. The lab lives in docker-compose.lab.yml.
+# Every service here is a PLACEHOLDER (see lab/placeholders/listen.py): it holds
+# a container open and listens on an explicit address so the network topology can
+# be measured before any application code exists. There are no endpoints, no
+# migrations, no authentication, no scanner adapter. M2 replaces these with the
+# real services on exactly these networks.
 #
-#   vapt_edge  — the ONLY network with egress, and only for the configured LLM
-#                provider. api + frontend attach here in M2.
-#   vapt_core  — internal: true. api, worker, postgres, redis in M2.
+# Topology (docs/NETWORK_ARCHITECTURE.md, ADR-0012):
+#   vapt_edge    internal  frontend + api        (the api's HTTP listener binds HERE ONLY)
+#   vapt_core    internal  api + worker + postgres + redis
+#   vapt_egress  internal  api + egress-proxy
+#   vapt_wan     bridge    egress-proxy + llm-standin   <- the ONLY WAN route
 #
-# The worker will be dual-homed vapt_core + vapt_lab and will hold no LLM
-# credentials (docs/ARCHITECTURE.md §2).
+# The api therefore has no internet route at all; the proxy is the sole egress
+# boundary and accepts CONNECT to one allowlisted destination.
 name: vapt
 
 networks:
   vapt_edge:
     name: ${EDGE_NETWORK_NAME:-vapt_edge}
     driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: "${EDGE_SUBNET:-172.30.20.0/24}"
   vapt_core:
     name: ${CORE_NETWORK_NAME:-vapt_core}
     driver: bridge
     internal: true
+    ipam:
+      config:
+        - subnet: "${CORE_SUBNET:-172.30.21.0/24}"
+  vapt_egress:
+    name: ${EGRESS_NETWORK_NAME:-vapt_egress}
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: "${EGRESS_SUBNET:-172.30.22.0/24}"
+  vapt_wan:
+    name: ${WAN_NETWORK_NAME:-vapt_wan}
+    driver: bridge
+    ipam:
+      config:
+        - subnet: "${WAN_SUBNET:-172.30.23.0/24}"
 
-services: {}
+x-placeholder: &placeholder
+  image: python@sha256:c5ba3deef00c7758561a0f03c26f44f10589263d40e732b8748e0d1f38f6dd89
+  restart: "no"
+  init: true
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  user: "65532:65532"
+  pids_limit: 128
+  mem_limit: 256m
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=16m
+  command: ["python3", "/app/listen.py"]
+  volumes:
+    - ./lab/placeholders/listen.py:/app/listen.py:ro
+
+services:
+  frontend:
+    <<: *placeholder
+    container_name: vapt_frontend
+    hostname: frontend
+    environment:
+      SERVICE_NAME: frontend
+      BIND_SPEC: "172.30.20.10:8080"
+    networks:
+      vapt_edge:
+        ipv4_address: 172.30.20.10
+
+  api:
+    <<: *placeholder
+    container_name: vapt_api
+    hostname: api
+    # The HTTP listener binds the vapt_edge address ONLY, so nothing on
+    # vapt_core (the worker) or vapt_egress (the proxy) can reach it.
+    environment:
+      SERVICE_NAME: api
+      BIND_SPEC: "172.30.20.20:8000"
+      HTTPS_PROXY: "http://172.30.22.60:3128"
+      HTTP_PROXY: "http://172.30.22.60:3128"
+      LLM_ENABLED: "false"
+      LLM_PROVIDER_HOST: "llm-standin"
+      LLM_PROVIDER_PORT: "8443"
+    networks:
+      vapt_edge:
+        ipv4_address: 172.30.20.20
+      vapt_core:
+        ipv4_address: 172.30.21.20
+      vapt_egress:
+        ipv4_address: 172.30.22.20
+
+  worker:
+    <<: *placeholder
+    container_name: vapt_worker
+    hostname: worker
+    # NO proxy variables, NO LLM variables, NO credentials. Airgapped by
+    # topology: vapt_core only in M1.5 (vapt_lab is added in M3).
+    environment:
+      SERVICE_NAME: worker
+      BIND_SPEC: "172.30.21.30:9000"
+    networks:
+      vapt_core:
+        ipv4_address: 172.30.21.30
+
+  postgres:
+    <<: *placeholder
+    container_name: vapt_postgres
+    hostname: postgres
+    # Placeholder listener only — no database in M1.5 (no migrations, no data).
+    environment:
+      SERVICE_NAME: postgres-placeholder
+      BIND_SPEC: "172.30.21.40:5432"
+    networks:
+      vapt_core:
+        ipv4_address: 172.30.21.40
+
+  redis:
+    <<: *placeholder
+    container_name: vapt_redis
+    hostname: redis
+    environment:
+      SERVICE_NAME: redis-placeholder
+      BIND_SPEC: "172.30.21.50:6379"
+    networks:
+      vapt_core:
+        ipv4_address: 172.30.21.50
+
+  egress-proxy:
+    <<: *placeholder
+    container_name: vapt_egress_proxy
+    hostname: egress-proxy
+    command: ["python3", "/app/proxy.py"]
+    volumes:
+      - ./lab/egress-proxy/proxy.py:/app/proxy.py:ro
+    environment:
+      SERVICE_NAME: egress-proxy
+      PROXY_BIND_IP: "172.30.22.60"          # egress interface only, never 0.0.0.0
+      PROXY_PORT: "3128"
+      EGRESS_ALLOWLIST: "${EGRESS_ALLOWLIST:-llm-standin:8443}"
+      INTERNAL_DENY_CIDRS: "172.30.20.0/24,172.30.21.0/24,172.30.22.0/24,172.30.10.0/24"
+    networks:
+      vapt_egress:
+        ipv4_address: 172.30.22.60
+      vapt_wan:
+        ipv4_address: 172.30.23.60
+
+  llm-standin:
+    <<: *placeholder
+    container_name: vapt_llm_standin
+    hostname: llm-standin
+    # TEST ONLY. Stands in for the provider endpoint so no real provider is ever
+    # contacted. Removed with the rest of the M1.5 stack (make net-down).
+    command: ["python3", "/app/standin.py"]
+    volumes:
+      - ./lab/llm-standin/standin.py:/app/standin.py:ro
+    environment:
+      SERVICE_NAME: llm-standin
+      STANDIN_PORT: "8443"
+    networks:
+      vapt_wan:
+        ipv4_address: 172.30.23.70
