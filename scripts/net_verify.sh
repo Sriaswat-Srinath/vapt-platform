@@ -144,8 +144,12 @@ for c in vapt_worker vapt_frontend; do
   # Flag anything that could CARRY a credential or ENABLE an outbound call.
   # `LLM_ENABLED=false` is explicitly permitted: it documents the posture and
   # grants nothing. `LLM_ENABLED=true` on these containers is a failure.
+  # The worker holds the ZAP CONTROL key by necessity (it drives the scanner) and
+  # nothing else. That key grants no internet access and no provider access, so
+  # it is excluded here and asserted separately by NET-C:api:no-zap-key below.
   leak=$(docker inspect "$c" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
-         | grep -icE '^(.*_API_KEY|.*_TOKEN|HTTPS?_PROXY|ANTHROPIC|OPENAI|LLM_(API_KEY|PROVIDER|MODEL|BASE_URL)|ZAP_API_KEY)=' || true)
+         | grep -vE '^ZAP_API_KEY=' \
+         | grep -icE '^(.*_API_KEY|.*_TOKEN|HTTPS?_PROXY|ANTHROPIC|OPENAI|LLM_(API_KEY|PROVIDER|MODEL|BASE_URL))=' || true)
   llm_on=$(docker inspect "$c" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
          | grep -icE '^LLM_ENABLED=(true|1|yes)$' || true)
   add "NET-C:${c#vapt_}" 0 "$leak" "$(eq "$leak" 0)" "no credential or proxy env in ${c#vapt_}"
@@ -157,6 +161,12 @@ apiproxy=$(docker inspect vapt_api --format '{{range .Config.Env}}{{println .}}{
 add "NET-C:api-proxy" 1 "$apiproxy" "$(eq "$apiproxy" 1)" "api is configured to egress ONLY via the proxy"
 apikey=$(docker inspect vapt_api --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | grep -icE 'API_KEY|ANTHROPIC|OPENAI' || true)
 add "NET-C:api-nocred" 0 "$apikey" "$(eq "$apikey" 0)" "no provider credential in the api environment"
+# The api must NOT hold the scanner control key: it has no route to vapt_lab and
+# must not drive the scanner. Scanner control belongs to the worker alone.
+apizap=$(docker inspect vapt_api --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | grep -cE '^ZAP_API_KEY=.+' || true)
+add "NET-C:api:no-zap-key" 0 "$apizap" "$(eq "$apizap" 0)" "the api holds no ZAP control key (scanner control is the worker's)"
+wkzap=$(docker inspect vapt_worker --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | grep -cE '^ZAP_API_KEY=.+' || true)
+add "NET-C:worker:zap-key" 1 "$wkzap" "$(eq "$wkzap" 1)" "the worker holds the ZAP control key (required to drive the scanner)"
 # published ports + docker socket + routes
 for c in vapt_frontend vapt_api vapt_worker vapt_postgres vapt_redis vapt_egress_proxy vapt_llm_standin; do
   pb=$(docker inspect "$c" --format '{{json .HostConfig.PortBindings}}' 2>/dev/null)

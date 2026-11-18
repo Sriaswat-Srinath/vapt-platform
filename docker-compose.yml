@@ -189,6 +189,13 @@ services:
       DEFAULT_SCANNER_ADAPTER: ${DEFAULT_SCANNER_ADAPTER:-mock}
       LAB_SUBNET: ${LAB_SUBNET:-172.30.10.0/24}
       LLM_ENABLED: "false"
+      ZAP_BASE_URL: ${ZAP_BASE_URL:-http://172.30.10.10:8080}
+      ZAP_API_KEY: ${ZAP_API_KEY:-}
+      CANCELLATION_SLA_SECONDS: ${CANCELLATION_SLA_SECONDS:-120}
+      # Fault injection for the mock adapter, used by the phase-4 tests to
+      # exercise the failure paths (unconfirmed cancel, unconfirmed teardown).
+      # Empty in normal operation.
+      MOCK_FAULT: ${MOCK_FAULT:-}
     depends_on:
       postgres:
         condition: service_healthy

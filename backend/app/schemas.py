@@ -133,6 +133,7 @@ class JobOut(ORM):
     id: Any
     asset_id: Any
     profile_key: str
+    mode: str
     state: str
     phase: str
     adapter_name: str | None

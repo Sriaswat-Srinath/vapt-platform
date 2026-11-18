@@ -271,6 +271,18 @@ class ScanJob(Base):
     pinned_ips: Mapped[list[str] | None] = mapped_column(ARRAY(String))
     coverage_complete: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     requests_made: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # phase 4: daemon isolation bookkeeping (ADR-0008)
+    # `fixture` replays recorded data and contacts nothing; `live` touches the
+    # target and goes through the full gate chain. Recorded so the worker
+    # re-evaluates in the SAME mode the request was admitted under.
+    mode: Mapped[str] = mapped_column(String(10), default="live", nullable=False)
+    requires_exclusive_daemon: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    daemon_lease_id: Mapped[Any | None] = mapped_column(UUID(as_uuid=True))
+    session_asserted_empty_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    teardown_confirmed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    adapter_handle: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    cancel_requested_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    observations_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     stop_reason: Mapped[str | None] = mapped_column(String(32))
     error: Mapped[str | None] = mapped_column(Text)
     budget_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
@@ -280,6 +292,10 @@ class ScanJob(Base):
     started_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[dt.datetime] = _now()
+
+
+class _ScanJobConstraints:
+    pass
 
 
 class ScanJobEvent(Base):
@@ -425,3 +441,94 @@ class CandidateTest(Base):
     created_at: Mapped[dt.datetime] = _now()
     __table_args__ = (UniqueConstraint("asset_id", "endpoint_id", "concern",
                                        name="uq_candidate_identity"),)
+
+
+# ------------------------------------------------- scanner daemon / adapters --
+class ScannerDaemonState(Base):
+    """One row per adapter. Gate 13 reads it; only an audited, verification-gated
+    reset may clear `is_dirty` (ADR-0008 R3 §10)."""
+    __tablename__ = "scanner_daemon_state"
+    adapter_name: Mapped[str] = mapped_column(String(40), primary_key=True)
+    is_dirty: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False,
+                                     server_default="false")
+    dirty_reason: Mapped[str | None] = mapped_column(Text)
+    dirty_since: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    dirty_job_id: Mapped[Any | None] = mapped_column(UUID(as_uuid=True))
+    requires_operator_restart: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False,
+                                     server_default="false")
+    instance_marker: Mapped[str | None] = mapped_column(String(120))
+    observed_version: Mapped[str | None] = mapped_column(String(40))
+    last_reset_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    last_reset_by: Mapped[Any | None] = mapped_column(UUID(as_uuid=True), ForeignKey("analysts.id"))
+    last_reset_outcome: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    updated_at: Mapped[dt.datetime] = _now()
+
+
+class ScannerDaemonLease(Base):
+    """The GLOBAL exclusive lease. One `held` lease per adapter, enforced by a
+    partial unique index: `newSession` is a daemon-global operation, so a
+    per-asset lock cannot isolate jobs (ADR-0008 R2)."""
+    __tablename__ = "scanner_daemon_leases"
+    id: Mapped[Any] = _pk()
+    adapter_name: Mapped[str] = mapped_column(String(40), nullable=False)
+    lease_state: Mapped[str] = mapped_column(String(12), nullable=False)
+    job_id: Mapped[Any | None] = mapped_column(UUID(as_uuid=True), ForeignKey("scan_jobs.id"))
+    holder_worker_id: Mapped[str | None] = mapped_column(String(80))
+    acquired_at: Mapped[dt.datetime] = _now()
+    heartbeat_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    released_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    abandoned_reason: Mapped[str | None] = mapped_column(Text)
+    daemon_dirty_on_release: Mapped[bool] = mapped_column(Boolean, default=False,
+                                                          nullable=False,
+                                                          server_default="false")
+    __table_args__ = (
+        CheckConstraint("lease_state in ('held','released','abandoned')", name="ck_lease_state"),
+    )
+
+
+class ScannerReset(Base):
+    __tablename__ = "scanner_resets"
+    id: Mapped[Any] = _pk()
+    at: Mapped[dt.datetime] = _now()
+    requested_by: Mapped[Any | None] = mapped_column(UUID(as_uuid=True), ForeignKey("analysts.id"))
+    adapter_name: Mapped[str] = mapped_column(String(40), nullable=False)
+    steps: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    cleared_dirty: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False,
+                                                server_default="false")
+    failing_step: Mapped[str | None] = mapped_column(String(12))
+    trace_id: Mapped[str | None] = mapped_column(String(64))
+
+
+class RawObservation(Base):
+    """Verbatim scanner output. IMMUTABLE: never edited by normalisation,
+    validation or scoring (ADR-0002). Findings link to these for provenance."""
+    __tablename__ = "raw_observations"
+    id: Mapped[Any] = _pk()
+    job_id: Mapped[Any] = mapped_column(UUID(as_uuid=True), ForeignKey("scan_jobs.id"), nullable=False)
+    asset_id: Mapped[Any] = mapped_column(UUID(as_uuid=True), ForeignKey("assets.id"), nullable=False)
+    adapter_name: Mapped[str] = mapped_column(String(40), nullable=False)
+    adapter_version: Mapped[str | None] = mapped_column(String(40))
+    adapter_rule_id: Mapped[str | None] = mapped_column(String(60))
+    captured_at: Mapped[dt.datetime] = _now()
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    payload_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    request_sha256: Mapped[str | None] = mapped_column(String(64))
+    response_sha256: Mapped[str | None] = mapped_column(String(64))
+    observed_url: Mapped[str | None] = mapped_column(String(1024))
+    observed_peer_ip: Mapped[str | None] = mapped_column(String(45))
+
+
+class IngestionRejection(Base):
+    """An observation refused at ingestion. Recorded here, never in
+    raw_observations (ADR-0011 R3 §13)."""
+    __tablename__ = "ingestion_rejections"
+    id: Mapped[Any] = _pk()
+    at: Mapped[dt.datetime] = _now()
+    job_id: Mapped[Any | None] = mapped_column(UUID(as_uuid=True), ForeignKey("scan_jobs.id"))
+    asset_id: Mapped[Any | None] = mapped_column(UUID(as_uuid=True), ForeignKey("assets.id"))
+    reason: Mapped[str] = mapped_column(String(40), nullable=False)
+    observed_url: Mapped[str | None] = mapped_column(String(1024))
+    observed_peer_ip: Mapped[str | None] = mapped_column(String(45))
+    payload_sha256: Mapped[str | None] = mapped_column(String(64))
+    trace_id: Mapped[str | None] = mapped_column(String(64))

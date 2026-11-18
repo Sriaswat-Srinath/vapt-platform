@@ -17,7 +17,8 @@ REQUIRE="all"
 cd "$(dirname "$0")/.."
 [ -f .env ] && { set -a; . ./.env; set +a; }
 mkdir -p "${LAB_STATE_DIR:-.lab-state}"
-LAB_CLIENT_IP="${LAB_CLIENT_IP:-172.30.10.30}"   # must fall inside ZAP_API_CLIENT_ALLOWLIST
+LAB_CLIENT_IP="${LAB_CLIENT_IP:-172.30.10.39}"   # inside ZAP_API_CLIENT_ALLOWLIST (.3x);
+                                                 # .30 belongs to the worker from phase 3
 
 LAB_NET="${LAB_NETWORK_NAME:-vapt_lab}"
 SUBNET="${LAB_SUBNET:-172.30.10.0/24}"

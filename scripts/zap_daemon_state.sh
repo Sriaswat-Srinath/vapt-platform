@@ -47,7 +47,7 @@ container_identity() {   # prints: <container_id> <started_at>
 }
 api() { # in-lab, allowlisted client at .30 — the host (.1) is not allowlisted
   local img; img=$(docker inspect vapt_juiceshop --format '{{.Image}}' 2>/dev/null)
-  docker run --rm --network "$LAB_NET" --ip 172.30.10.30 --entrypoint "${JS_NODE_PATH:-/nodejs/bin/node}" "$img" -e "
+  docker run --rm --network "$LAB_NET" --ip "${LAB_CLIENT_IP:-172.30.10.39}" --entrypoint "${JS_NODE_PATH:-/nodejs/bin/node}" "$img" -e "
 const u=new URL('http://$ZAP_IP:8080$1');
 require('http').get({host:u.hostname,port:u.port,path:u.pathname+u.search,timeout:10000},
  r=>{let b='';r.on('data',d=>b+=d);r.on('end',()=>{console.log(r.statusCode+'|'+b.slice(0,200).replace(/\n/g,' '))})})

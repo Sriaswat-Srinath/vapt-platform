@@ -69,11 +69,25 @@ class ApprovalSnapshot:
     decider_identity_ok: bool
 
 
+# Execution modes. `fixture` work replays recorded/hand-authored data and makes
+# NO network contact of any kind, so the execution-specific gates do not apply to
+# it — exactly as for fixture discovery. It is a distinct mode recorded on every
+# decision, NOT a relaxation of a gate: a fixture decision can never authorise a
+# scan, because `live` is the only mode an adapter that touches the target accepts.
+MODE_FIXTURE = "fixture"
+MODE_LIVE = "live"
+EXECUTION_GATES = ("scanner_execution_enabled", "lab_isolation_valid", "grant_active",
+                   "profile_allowed", "intrusive_approval", "target_resolution",
+                   "port_allowed", "scanner_daemon_available")
+NOT_APPLICABLE = "not applicable in fixture mode: no network contact is made"
+
+
 @dc.dataclass(frozen=True, slots=True)
 class ScopeRequest:
     """Immutable snapshot of everything the decision depends on."""
     now: dt.datetime
     subject_type: str
+    mode: str = MODE_LIVE
     target_url_path: str = "/"
     target_method: str = "GET"
 
@@ -136,6 +150,7 @@ class ScopeDecisionResult:
     policy_version: str
     gate_results: tuple[GateResult, ...]
     resolved_ips: tuple[str, ...] = ()
+    mode: str = MODE_LIVE
 
     @property
     def allowed(self) -> bool:
@@ -149,6 +164,7 @@ class ScopeDecisionResult:
         return {
             "policy_version": self.policy_version,
             "decision": self.decision,
+            "mode": self.mode,
             "gate_results": [g.as_dict() for g in self.gate_results],
             "resolved_ips": list(self.resolved_ips),
         }
@@ -370,6 +386,9 @@ def evaluate(request: ScopeRequest, *, short_circuit: bool = True) -> ScopeDecis
     results: list[GateResult] = []
     failed = False
     for _ordinal, name, gate in GATES:
+        if request.mode == MODE_FIXTURE and name in EXECUTION_GATES:
+            results.append(GateResult(name, True, NOT_APPLICABLE))
+            continue
         try:
             res = gate(request)
         except Exception as exc:                      # noqa: BLE001 - deliberate
@@ -382,4 +401,5 @@ def evaluate(request: ScopeRequest, *, short_circuit: bool = True) -> ScopeDecis
             if short_circuit:
                 break
     decision = "deny" if failed else "allow"
-    return ScopeDecisionResult(decision, POLICY_VERSION, tuple(results), request.resolved_ips)
+    return ScopeDecisionResult(decision, POLICY_VERSION, tuple(results), request.resolved_ips,
+                               request.mode)

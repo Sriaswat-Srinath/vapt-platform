@@ -74,7 +74,9 @@ def active_grant(session: Session, asset_id: Any) -> models.ScopeGrant | None:
 
 def build_scope_request(session: Session, *, asset: models.Asset | None, profile_key: str | None,
                         path: str = "/", method: str = "GET",
-                        subject_type: str = "scan_job") -> sp.ScopeRequest:
+                        subject_type: str = "scan_job",
+                        mode: str = sp.MODE_LIVE,
+                        exclude_job_id: Any | None = None) -> sp.ScopeRequest:
     s = settings()
     now = dt.datetime.now(dt.timezone.utc)
     iso = latest_isolation(session)
@@ -104,14 +106,35 @@ def build_scope_request(session: Session, *, asset: models.Asset | None, profile
     if asset is not None:
         resolved, resolution_error = resolve_host(asset.hostname)
 
-    in_flight_global = int(session.execute(select(func.count()).select_from(models.ScanJob)
-                                          .where(models.ScanJob.state.in_(IN_FLIGHT))).scalar_one())
-    in_flight_asset = int(session.execute(select(func.count()).select_from(models.ScanJob).where(
-        models.ScanJob.state.in_(IN_FLIGHT),
-        models.ScanJob.asset_id == asset.id)).scalar_one()) if asset else 0
+    # Gate 13 inputs: real daemon state, not a placeholder (ADR-0008 R2 §gate 13).
+    adapter_for_profile = profile.adapter_name if profile else None
+    daemon_dirty = daemon_lease_held = False
+    if adapter_for_profile:
+        st = session.get(models.ScannerDaemonState, adapter_for_profile)
+        daemon_dirty = bool(st and st.is_dirty)
+        daemon_lease_held = bool(session.execute(select(func.count()).select_from(
+            models.ScannerDaemonLease).where(
+            models.ScannerDaemonLease.adapter_name == adapter_for_profile,
+            models.ScannerDaemonLease.lease_state == "held")).scalar_one())
+
+    # Exclude the job being evaluated: a worker re-checking its own job must not
+    # count itself as a conflicting in-flight job (gates 11 and 12).
+    global_stmt = select(func.count()).select_from(models.ScanJob).where(
+        models.ScanJob.state.in_(IN_FLIGHT))
+    if exclude_job_id is not None:
+        global_stmt = global_stmt.where(models.ScanJob.id != exclude_job_id)
+    in_flight_global = int(session.execute(global_stmt).scalar_one())
+    in_flight_asset = 0
+    if asset is not None:
+        asset_stmt = select(func.count()).select_from(models.ScanJob).where(
+            models.ScanJob.state.in_(IN_FLIGHT), models.ScanJob.asset_id == asset.id)
+        if exclude_job_id is not None:
+            asset_stmt = asset_stmt.where(models.ScanJob.id != exclude_job_id)
+        in_flight_asset = int(session.execute(asset_stmt).scalar_one())
 
     return sp.ScopeRequest(
-        now=now, subject_type=subject_type, target_url_path=path, target_method=method,
+        now=now, subject_type=subject_type, mode=mode, target_url_path=path,
+        target_method=method,
         scanner_execution_enabled=s.scanner_execution_enabled,
         active_scan_enabled=s.active_scan_enabled,
         dual_control_available_flag=s.dual_control_available,
@@ -145,7 +168,7 @@ def build_scope_request(session: Session, *, asset: models.Asset | None, profile
         max_concurrent_jobs_global=s.max_concurrent_jobs_global,
         max_concurrent_jobs_per_asset=s.max_concurrent_jobs_per_asset,
         adapter_requires_exclusive_daemon=bool(profile and profile.adapter_name == "zap"),
-        daemon_dirty=False, daemon_lease_held=False,
+        daemon_dirty=daemon_dirty, daemon_lease_held=daemon_lease_held,
     )
 
 
@@ -155,7 +178,8 @@ def persist_decision(session: Session, result: sp.ScopeDecisionResult, *, subjec
     row = models.ScopeDecision(
         subject_type=subject_type, subject_id=subject_id, asset_id=asset_id,
         policy_version=result.policy_version, decision=result.decision,
-        gate_results={"gate_results": [g.as_dict() for g in result.gate_results]},
+        gate_results={"mode": result.mode,
+                      "gate_results": [g.as_dict() for g in result.gate_results]},
         resolved_ips=list(result.resolved_ips), actor_kind=actor_kind, actor_id=actor_id)
     session.add(row)
     session.flush()
@@ -165,10 +189,12 @@ def persist_decision(session: Session, result: sp.ScopeDecisionResult, *, subjec
 def evaluate_and_persist(session: Session, *, asset: models.Asset | None, profile_key: str | None,
                          path: str, method: str, actor_id: str | None,
                          subject_type: str = "scan_job", subject_id: str | None = None,
-                         short_circuit: bool = True
+                         short_circuit: bool = True, mode: str = sp.MODE_LIVE,
+                         exclude_job_id: Any | None = None
                          ) -> tuple[sp.ScopeDecisionResult, models.ScopeDecision]:
     req = build_scope_request(session, asset=asset, profile_key=profile_key, path=path,
-                              method=method, subject_type=subject_type)
+                              method=method, subject_type=subject_type, mode=mode,
+                              exclude_job_id=exclude_job_id)
     result = sp.evaluate(req, short_circuit=short_circuit)
     row = persist_decision(session, result, subject_type=subject_type, subject_id=subject_id,
                            asset_id=asset.id if asset else None, actor_kind="human",
@@ -176,7 +202,7 @@ def evaluate_and_persist(session: Session, *, asset: models.Asset | None, profil
     audit.record(session, action="scope_decision", actor_kind="human", actor_id=actor_id,
                  outcome=result.decision, subject_type=subject_type,
                  subject_id=subject_id or (str(asset.id) if asset else None),
-                 detail={"policy_version": result.policy_version,
+                 detail={"policy_version": result.policy_version, "mode": result.mode,
                          "first_failure": (result.first_failure.gate if result.first_failure else None),
                          "scope_decision_id": str(row.id)})
     return result, row
@@ -184,7 +210,8 @@ def evaluate_and_persist(session: Session, *, asset: models.Asset | None, profil
 
 # ------------------------------------------------------------------- jobs -----
 def create_job(session: Session, *, asset: models.Asset, profile_key: str, actor_id: str,
-               trace: str, idempotency_key: str | None) -> models.ScanJob:
+               trace: str, idempotency_key: str | None,
+               mode: str = sp.MODE_LIVE) -> models.ScanJob:
     """Create a job ONLY on an allow decision. A denial raises 409 with the
     ordered gate results, and the denial itself is persisted and audited."""
     if idempotency_key:
@@ -192,19 +219,33 @@ def create_job(session: Session, *, asset: models.Asset, profile_key: str, actor
             models.ScanJob.idempotency_key == idempotency_key)).scalar_one_or_none()
         if existing is not None:
             return existing
+    profile_row = session.execute(select(models.ScanProfile).where(
+        models.ScanProfile.key == profile_key)).scalar_one_or_none()
+    if profile_row is None:
+        raise errors.bad_request(f"unknown scan profile {profile_key!r}")
+    if mode == sp.MODE_FIXTURE and profile_row.adapter_name != "mock":
+        # Fixture mode exists because the mock adapter contacts nothing. An
+        # adapter that touches the target may only ever run in live mode.
+        raise errors.conflict(
+            "fixture-mode-requires-mock-adapter", "Fixture mode requires the mock adapter",
+            f"profile {profile_key!r} uses the {profile_row.adapter_name!r} adapter, which "
+            "contacts the target; it may only run in live mode under the full gate chain")
+    if mode == sp.MODE_FIXTURE and (profile_row.is_intrusive or profile_row.active_scan):
+        raise errors.conflict("fixture-mode-not-intrusive", "Fixture mode cannot be intrusive",
+                              "an intrusive or active profile may only run in live mode")
     result, decision_row = evaluate_and_persist(
         session, asset=asset, profile_key=profile_key, path=asset.base_path or "/",
-        method="GET", actor_id=actor_id)
+        method="GET", actor_id=actor_id, mode=mode)
     if not result.allowed:
         session.commit()
         raise errors.conflict("scope-denied", "Assessment request denied by scope policy",
                               f"Gate {result.first_failure.gate!r} failed",
                               {"scope_decision": result.as_dict()})
-    profile = session.execute(select(models.ScanProfile).where(
-        models.ScanProfile.key == profile_key)).scalar_one()
+    profile = profile_row
+    grant = active_grant(session, asset.id)
     job = models.ScanJob(
-        asset_id=asset.id, scope_grant_id=active_grant(session, asset.id).id,
-        profile_key=profile_key, state="queued", phase="preflight",
+        asset_id=asset.id, scope_grant_id=(grant.id if grant else None),
+        profile_key=profile_key, state="queued", phase="preflight", mode=mode,
         idempotency_key=idempotency_key, adapter_name=settings().default_scanner_adapter,
         scope_decision_id=decision_row.id, pinned_ips=list(result.resolved_ips),
         trace_id=trace, created_by=actor_id,
@@ -220,3 +261,13 @@ def create_job(session: Session, *, asset: models.Asset, profile_key: str, actor
                  outcome="ok", subject_type="scan_job", subject_id=str(job.id), trace_id=trace,
                  detail={"profile_key": profile_key, "pinned_ips": list(result.resolved_ips)})
     return job
+
+
+def enqueue_job(job: models.ScanJob) -> bool:
+    """Hand the job to the worker. A broker failure leaves it `queued`."""
+    try:
+        from .worker.tasks import run_assessment
+        run_assessment.apply_async(args=[str(job.id)], queue="vapt")
+        return True
+    except Exception:                                      # noqa: BLE001
+        return False

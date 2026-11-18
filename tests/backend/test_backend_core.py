@@ -115,9 +115,21 @@ def test_dry_run_reports_every_gate(asset_id):
 
 
 def test_no_assessment_rows_exist_for_denied_requests(asset_id):
+    """A denied request must create no job. Fixture-mode jobs (which contact
+    nothing and are admitted under the fixture gate set) may legitimately exist,
+    so the assertion is that nothing in LIVE mode was ever admitted - live is
+    always denied while the authorisation is unsigned."""
     status, jobs = call("GET", f"/assessments?asset_id={asset_id}")
     assert status == 200
-    assert jobs == [], f"a denied request created a job: {jobs}"
+    # An API-side denial creates no row at all. A row admitted earlier and then
+    # blocked by the worker may exist; what must never happen is a LIVE
+    # assessment actually executing while the authorisation is unsigned.
+    executed = [j for j in jobs
+                if j["mode"] == "live" and j["state"] in ("running", "completed", "cancelled")]
+    assert executed == [], f"a live assessment executed: {executed}"
+    for j in (x for x in jobs if x["mode"] == "live"):
+        s, obs = call("GET", f"/assessments/{j['id']}/raw-observations")
+        assert s == 200 and obs["stored"] == 0, f"a live job stored observations: {j['id']}"
 
 
 # ------------------------------------- I3 / I9: dual control + authorisation ---

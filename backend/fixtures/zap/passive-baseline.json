@@ -1,0 +1,156 @@
+{
+  "_comment": [
+    "Hand-authored ZAP-shaped alerts for the mock adapter. NOT captured from a live scan:",
+    "the authorisation document is unsigned, so no scan has run (CLAUDE.md rules 6-7).",
+    "Shapes follow the ZAP /JSON/alert/view/alerts and /JSON/core/view/message responses.",
+    "One alert deliberately names a third-party host so ingestion rejection is exercised."
+  ],
+  "zap_version": "2.17.0",
+  "alerts": [
+    {
+      "pluginId": "10038",
+      "alertRef": "10038-1",
+      "name": "Content Security Policy (CSP) Header Not Set",
+      "riskdesc": "Medium (High)",
+      "risk": "Medium",
+      "confidence": "High",
+      "url": "http://shop.brakes-vapt.test:3000/",
+      "method": "GET",
+      "param": "",
+      "evidence": "",
+      "description": "Content Security Policy (CSP) is an added layer of security...",
+      "solution": "Ensure that your web server sets the Content-Security-Policy header.",
+      "cweid": "693",
+      "wascid": "15",
+      "messageId": "12"
+    },
+    {
+      "pluginId": "10038",
+      "alertRef": "10038-1",
+      "name": "Content Security Policy (CSP) Header Not Set",
+      "riskdesc": "Medium (High)",
+      "risk": "Medium",
+      "confidence": "High",
+      "url": "http://shop.brakes-vapt.test:3000/login",
+      "method": "GET",
+      "param": "",
+      "evidence": "",
+      "description": "Content Security Policy (CSP) is an added layer of security...",
+      "solution": "Ensure that your web server sets the Content-Security-Policy header.",
+      "cweid": "693",
+      "wascid": "15",
+      "messageId": "13"
+    },
+    {
+      "pluginId": "10020",
+      "alertRef": "10020-1",
+      "name": "Missing Anti-clickjacking Header",
+      "riskdesc": "Medium (Medium)",
+      "risk": "Medium",
+      "confidence": "Medium",
+      "url": "http://shop.brakes-vapt.test:3000/",
+      "method": "GET",
+      "param": "x-frame-options",
+      "evidence": "",
+      "description": "The response does not protect against 'ClickJacking' attacks.",
+      "solution": "Modern browsers support the Content-Security-Policy frame-ancestors directive.",
+      "cweid": "1021",
+      "wascid": "15",
+      "messageId": "12"
+    },
+    {
+      "pluginId": "10021",
+      "alertRef": "10021-1",
+      "name": "X-Content-Type-Options Header Missing",
+      "riskdesc": "Low (Medium)",
+      "risk": "Low",
+      "confidence": "Medium",
+      "url": "http://shop.brakes-vapt.test:3000/",
+      "method": "GET",
+      "param": "x-content-type-options",
+      "evidence": "",
+      "description": "The Anti-MIME-Sniffing header was not set to 'nosniff'.",
+      "solution": "Ensure that the application/web server sets the Content-Type header appropriately.",
+      "cweid": "693",
+      "wascid": "15",
+      "messageId": "12"
+    },
+    {
+      "pluginId": "10096",
+      "alertRef": "10096-1",
+      "name": "Timestamp Disclosure - Unix",
+      "riskdesc": "Low (Low)",
+      "risk": "Low",
+      "confidence": "Low",
+      "url": "http://shop.brakes-vapt.test:3000/api/Products",
+      "method": "GET",
+      "param": "",
+      "evidence": "1700000000",
+      "description": "A timestamp was disclosed by the application/web server.",
+      "solution": "Manually confirm that the timestamp data is not sensitive.",
+      "cweid": "200",
+      "wascid": "13",
+      "messageId": "21"
+    },
+    {
+      "pluginId": "10015",
+      "alertRef": "10015-1",
+      "name": "Re-examine Cache-control Directives",
+      "riskdesc": "Informational (Low)",
+      "risk": "Informational",
+      "confidence": "Low",
+      "url": "http://shop.brakes-vapt.test:3000/login",
+      "method": "GET",
+      "param": "cache-control",
+      "evidence": "public",
+      "description": "The cache-control header has not been set properly.",
+      "solution": "For secure content, ensure the cache-control HTTP header is set.",
+      "cweid": "525",
+      "wascid": "13",
+      "messageId": "13"
+    },
+    {
+      "pluginId": "10038",
+      "alertRef": "10038-1",
+      "name": "Content Security Policy (CSP) Header Not Set",
+      "riskdesc": "Medium (High)",
+      "risk": "Medium",
+      "confidence": "High",
+      "url": "http://cdn.example.com/lib.js",
+      "method": "GET",
+      "param": "",
+      "evidence": "",
+      "description": "third-party host",
+      "solution": "n/a",
+      "cweid": "693",
+      "wascid": "15",
+      "messageId": "99"
+    }
+  ],
+  "messages": {
+    "12": {
+      "requestHeader": "GET / HTTP/1.1\r\nHost: shop.brakes-vapt.test:3000\r\nUser-Agent: ZAP\r\n\r\n",
+      "requestBody": "",
+      "responseHeader": "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nX-Powered-By: Express\r\n\r\n",
+      "responseBody": "<!doctype html><html><head><title>Juice Shop</title></head><body>...</body></html>"
+    },
+    "13": {
+      "requestHeader": "GET /login HTTP/1.1\r\nHost: shop.brakes-vapt.test:3000\r\nCookie: token=REDACTME\r\n\r\n",
+      "requestBody": "",
+      "responseHeader": "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nCache-Control: public\r\n\r\n",
+      "responseBody": "<form action=\"/rest/user/login\" method=\"POST\"><input type=\"password\" name=\"password\"></form>"
+    },
+    "21": {
+      "requestHeader": "GET /api/Products HTTP/1.1\r\nHost: shop.brakes-vapt.test:3000\r\n\r\n",
+      "requestBody": "",
+      "responseHeader": "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n",
+      "responseBody": "{\"status\":\"success\",\"data\":[{\"id\":1,\"updatedAt\":1700000000}]}"
+    },
+    "99": {
+      "requestHeader": "GET /lib.js HTTP/1.1\r\nHost: cdn.example.com\r\n\r\n",
+      "requestBody": "",
+      "responseHeader": "HTTP/1.1 200 OK\r\nContent-Type: application/javascript\r\n\r\n",
+      "responseBody": "//..."
+    }
+  }
+}
