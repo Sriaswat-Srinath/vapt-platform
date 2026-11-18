@@ -104,9 +104,16 @@ services:
     mem_limit: 768m
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=32m
+    volumes:
+      # Unredacted evidence originals. NEVER mounted into a scanner container
+      # (ADR-0011); asserted by the lab check.
+      - vapt_evidence:/var/lib/vapt/evidence
     environment:
       APP_ENV: ${APP_ENV:-dev}
       SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set}
+      EVIDENCE_BLOB_ROOT: /var/lib/vapt/evidence
+      REDACTION_HMAC_KEY: ${REDACTION_HMAC_KEY:?REDACTION_HMAC_KEY must be set}
+      REDACTION_KEY_ID: ${REDACTION_KEY_ID:-v1}
       API_BIND_IP: 172.30.20.20
       API_PORT: "8000"
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -175,9 +182,14 @@ services:
       - /tmp:rw,noexec,nosuid,size=32m
     command: ["celery", "-A", "app.worker.celery_app.celery", "worker",
               "--loglevel=INFO", "--concurrency=1", "-Q", "vapt"]
+    volumes:
+      - vapt_evidence:/var/lib/vapt/evidence
     environment:
       APP_ENV: ${APP_ENV:-dev}
       SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set}
+      EVIDENCE_BLOB_ROOT: /var/lib/vapt/evidence
+      REDACTION_HMAC_KEY: ${REDACTION_HMAC_KEY:?REDACTION_HMAC_KEY must be set}
+      REDACTION_KEY_ID: ${REDACTION_KEY_ID:-v1}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-vapt}:${POSTGRES_PASSWORD:?}@172.30.21.40:5432/${POSTGRES_DB:-vapt}
       REDIS_URL: redis://172.30.21.50:6379/0
@@ -348,3 +360,5 @@ services:
 volumes:
   vapt_pgdata:
     name: vapt_pgdata
+  vapt_evidence:
+    name: vapt_evidence

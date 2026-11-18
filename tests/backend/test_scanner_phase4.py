@@ -18,9 +18,10 @@ from test_backend_core import call, asset_id                         # noqa: E40
 
 
 def _spec(*, allowed: bool = True, pinned: tuple[str, ...] = ("172.30.10.20",),
-          adapter: str = "mock", intrusive: bool = False, active: bool = False) -> sb.ScanJobSpec:
+          adapter: str = "mock", intrusive: bool = False, active: bool = False,
+          mode: str = "live") -> sb.ScanJobSpec:
     return sb.ScanJobSpec(
-        job_id="00000000-0000-0000-0000-000000000001",
+        job_id="00000000-0000-0000-0000-000000000001", mode=mode,
         asset=sb.AssetSnapshot(asset_id="a", asset_identifier="MOCK-WEB-001",
                                hostname="shop.brakes-vapt.test", protocol="http", port=3000,
                                base_path="/"),
@@ -42,10 +43,29 @@ def test_adapter_refuses_a_spec_without_an_allow_decision():
         a.start(_spec(allowed=False))
 
 
-def test_adapter_refuses_a_spec_without_a_pinned_address():
+def test_live_work_requires_a_pinned_address():
     a = MockAdapter()
     with pytest.raises(sb.ScopeRefused):
-        a.start(_spec(pinned=()))
+        a.start(_spec(pinned=(), mode="live"))
+
+
+def test_fixture_work_does_not_require_a_resolvable_target():
+    """Fixture mode contacts nothing, so it must not depend on the lab being up."""
+    a = MockAdapter()
+    handle = a.start(_spec(pinned=(), mode="fixture"))
+    assert handle.job_id
+    assert a.teardown(handle).confirmed_stopped is True
+
+
+def test_the_zap_adapter_only_accepts_live_work():
+    from app.scanners.zap.adapter import ZapAdapter
+
+    class _Fake:
+        def version(self): return "2.17.0"
+        def close(self): pass
+    a = ZapAdapter(client=_Fake())                       # type: ignore[arg-type]
+    with pytest.raises(sb.ScopeRefused):
+        a.preflight(_spec(adapter="zap", mode="fixture"))
 
 
 def test_mock_adapter_declares_no_shared_daemon():
@@ -267,33 +287,49 @@ def test_zap_reset_is_delegated_to_the_worker_and_fully_verified():
 
 
 # ---- I13: cancellation is bounded -------------------------------------------
+def _worker_fault() -> str:
+    out = subprocess.run(["docker", "inspect", "vapt_worker", "--format",
+                          "{{range .Config.Env}}{{println .}}{{end}}"],
+                         capture_output=True, text=True).stdout
+    for line in out.splitlines():
+        if line.startswith("MOCK_FAULT="):
+            return line.split("=", 1)[1]
+    return ""
+
+
 def test_cancellation_reaches_a_terminal_state_within_the_sla(asset_id):
-    """Invariant I13, measured against the running worker."""
+    """Invariant I13, MEASURED against the running worker.
+
+    Needs a deterministic window in which the job is still running, so it
+    requires the worker to be started with MOCK_FAULT=slow. Racing a one-poll
+    mock would make this test flaky, and a flaky safety test is worse than an
+    honest skip: run `make test-cancellation`.
+    """
+    if _worker_fault() != "slow":
+        pytest.skip("worker is not running with MOCK_FAULT=slow; run `make test-cancellation` "
+                    "for a deterministic cancellation window")
     status, job = call("POST", f"/assets/{asset_id}/assessments?mode=fixture", role="analyst",
                        body={"profile_key": "mock-passive"})
     assert status == 201, job
     jid = job["id"]
-    for _ in range(40):
+    for _ in range(60):
         s, j = call("GET", f"/assessments/{jid}")
         if j["state"] in ("running", "completed", "cancelled", "failed"):
             break
-        time.sleep(0.4)
-    if j["state"] != "running":
-        pytest.skip(f"job reached {j['state']} before a cancel could be issued "
-                    "(set MOCK_FAULT=slow on the worker for a deterministic window)")
+        time.sleep(0.3)
+    assert j["state"] == "running", f"job left the running window too fast: {j['state']}"
     t0 = time.monotonic()
     assert call("POST", f"/assessments/{jid}/cancel", role="analyst")[0] == 200
     for _ in range(300):
         s, j = call("GET", f"/assessments/{jid}")
         if j["state"] in ("cancelled", "failed", "completed"):
             break
-        time.sleep(0.4)
+        time.sleep(0.3)
     elapsed = time.monotonic() - t0
     sla = int(os.environ.get("CANCELLATION_SLA_SECONDS", "120"))
     assert elapsed < sla, f"cancellation took {elapsed:.1f}s, over the {sla}s SLA"
-    assert j["state"] in ("cancelled", "failed")
-    if j["state"] == "cancelled":
-        assert j["coverage_complete"] is False, "a cancelled job must not claim full coverage"
+    assert j["state"] == "cancelled", f"the cancel did not take effect: {j['state']}"
+    assert j["coverage_complete"] is False, "a cancelled job must not claim full coverage"
 
 
 def test_cancelling_a_finished_assessment_is_refused(asset_id):

@@ -38,6 +38,87 @@ PROFILES = [
          method_denylist=["DELETE", "PUT", "PATCH"]),
 ]
 
+# Curated vulnerability classes. Human-maintained; the ONLY default source of
+# CVSS. Vectors and scores are the published CVSS v3.1 values for these classes.
+CATALOGUE = [
+    dict(key="missing-security-header-csp", title="Content-Security-Policy header not set",
+         category="security_misconfiguration", cwe_ids=["CWE-693"], default_severity="medium",
+         cvss_version="3.1", cvss_vector="CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:C/C:L/I:L/A:N",
+         cvss_base=5.0,
+         remediation_md=("Set a `Content-Security-Policy` response header on HTML responses. "
+                         "Start with a report-only policy, review violations, then enforce."),
+         references={"owasp": "https://owasp.org/www-project-secure-headers/"},
+         catalogue_version="1.0.0"),
+    dict(key="missing-security-header-frame-options",
+         title="Anti-clickjacking header missing", category="security_misconfiguration",
+         cwe_ids=["CWE-1021"], default_severity="medium", cvss_version="3.1",
+         cvss_vector="CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:N/I:L/A:N", cvss_base=3.1,
+         remediation_md=("Send `Content-Security-Policy: frame-ancestors 'none'` (or "
+                         "`X-Frame-Options: DENY`) on HTML responses that must not be framed."),
+         references={}, catalogue_version="1.0.0"),
+    dict(key="missing-security-header-content-type-options",
+         title="X-Content-Type-Options header missing", category="security_misconfiguration",
+         cwe_ids=["CWE-693"], default_severity="low", cvss_version="3.1",
+         cvss_vector="CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:N/A:N", cvss_base=3.1,
+         remediation_md="Send `X-Content-Type-Options: nosniff` on all responses.",
+         references={}, catalogue_version="1.0.0"),
+    dict(key="missing-security-header-hsts",
+         title="Strict-Transport-Security header missing", category="security_misconfiguration",
+         cwe_ids=["CWE-319"], default_severity="medium", cvss_version="3.1",
+         cvss_vector="CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:N", cvss_base=4.8,
+         remediation_md=("Send `Strict-Transport-Security` over HTTPS. Not applicable to a "
+                         "plain-HTTP lab target, which is why validation may mark it "
+                         "not applicable."),
+         references={}, catalogue_version="1.0.0"),
+    dict(key="missing-security-header-permissions-policy",
+         title="Permissions-Policy header missing", category="security_misconfiguration",
+         cwe_ids=["CWE-693"], default_severity="low", cvss_version=None, cvss_vector=None,
+         cvss_base=None,
+         remediation_md="Send a `Permissions-Policy` header disabling unused browser features.",
+         references={}, catalogue_version="1.0.0"),
+    dict(key="cache-control-directives", title="Cache-control directives need review",
+         category="security_misconfiguration", cwe_ids=["CWE-525"],
+         default_severity="informational", cvss_version=None, cvss_vector=None, cvss_base=None,
+         remediation_md=("Send `Cache-Control: no-store` on responses carrying sensitive data, "
+                         "and review `public` on authenticated responses."),
+         references={}, catalogue_version="1.0.0"),
+    dict(key="timestamp-disclosure", title="Timestamp disclosure",
+         category="information_disclosure", cwe_ids=["CWE-200"], default_severity="low",
+         cvss_version="3.1", cvss_vector="CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N",
+         cvss_base=3.7,
+         remediation_md=("Confirm the timestamp is not sensitive. Avoid returning internal "
+                         "clock values where they reveal deployment detail."),
+         references={}, catalogue_version="1.0.0"),
+    dict(key="information-disclosure-debug-errors", title="Debug error messages disclosed",
+         category="information_disclosure", cwe_ids=["CWE-209"], default_severity="medium",
+         cvss_version="3.1", cvss_vector="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+         cvss_base=5.3,
+         remediation_md="Return generic error pages; log detail server-side only.",
+         references={}, catalogue_version="1.0.0"),
+    dict(key="information-disclosure-comments", title="Information disclosed in comments",
+         category="information_disclosure", cwe_ids=["CWE-615"], default_severity="informational",
+         cvss_version=None, cvss_vector=None, cvss_base=None,
+         remediation_md="Strip developer comments from production responses.",
+         references={}, catalogue_version="1.0.0"),
+    dict(key="reflected-xss", title="Reflected cross-site scripting", category="injection",
+         cwe_ids=["CWE-79"], default_severity="high", cvss_version="3.1",
+         cvss_vector="CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N", cvss_base=6.1,
+         remediation_md=("Encode user input for the output context and apply a strict CSP. "
+                         "Prefer framework auto-escaping over manual sanitisation."),
+         references={}, catalogue_version="1.0.0"),
+    dict(key="sql-injection", title="SQL injection", category="injection",
+         cwe_ids=["CWE-89"], default_severity="critical", cvss_version="3.1",
+         cvss_vector="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", cvss_base=9.8,
+         remediation_md="Use parameterised queries; never concatenate user input into SQL.",
+         references={}, catalogue_version="1.0.0"),
+    dict(key="missing-anti-csrf-token", title="Anti-CSRF token missing on a form",
+         category="broken_access_control", cwe_ids=["CWE-352"], default_severity="medium",
+         cvss_version="3.1", cvss_vector="CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:L/A:N",
+         cvss_base=4.3,
+         remediation_md="Issue and verify a per-session anti-CSRF token on state-changing forms.",
+         references={}, catalogue_version="1.0.0"),
+]
+
 ACCOUNTS = [
     ("admin@vapt.local", "Lab Administrator", "admin"),
     ("analyst@vapt.local", "Security Analyst", "analyst"),
@@ -63,6 +144,11 @@ def main() -> int:
                     models.ApiToken.revoked_at.is_(None))).scalars().all():
                 _row, token = security.issue_token(s, a, label="seed")
                 issued[email] = token
+
+        for spec in CATALOGUE:
+            if s.execute(select(models.VulnCatalogue).where(
+                    models.VulnCatalogue.key == spec["key"])).scalar_one_or_none() is None:
+                s.add(models.VulnCatalogue(**spec))
 
         for spec in PROFILES:
             if s.execute(select(models.ScanProfile).where(

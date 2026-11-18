@@ -83,6 +83,15 @@ net-verify:                  ## run the network architecture verification
 net-prove-failure:           ## prove net_verify FAILS under induced egress, then reverts
 	@./scripts/prove_net_failure.sh
 
+test-cancellation:           ## measure cancellation against a deterministic window (I13)
+	@# --force-recreate is required: compose does not recreate a container when
+	@# only an interpolated env VALUE changes, so the fault would never apply.
+	@MOCK_FAULT=slow docker compose -f docker-compose.yml up -d --force-recreate worker >/dev/null
+	@sleep 8
+	@python3 -m pytest tests/backend/test_scanner_phase4.py -q \
+	  -k cancellation_reaches_a_terminal_state; status=$$?; \
+	  docker compose -f docker-compose.yml up -d --force-recreate worker >/dev/null; exit $$status
+
 test-net:                    ## pytest wrappers over the network probes
 	@python3 -m pytest tests/net -v
 
@@ -92,10 +101,21 @@ api-up:                      ## build + start the real API (phase 2)
 	  [ "$$(docker inspect vapt_api --format '{{.State.Health.Status}}')" = healthy ] && { echo "api healthy"; exit 0; }; sleep 5; done; \
 	echo "api did not become healthy"; exit 1
 
-db-migrate:                  ## run alembic migrations
+evidence-init:                ## one-off: give the non-root app user the evidence volume
+	@docker run --rm -v vapt_evidence:/d --user root --entrypoint sh vapt-api:dev \
+	  -c 'mkdir -p /d && chown -R 65532:65532 /d && chmod 700 /d && echo "evidence volume owned by 65532"'
+
+db-migrate:                  ## run alembic migrations (from the working tree)
 	@set -a; . ./.env; set +a; docker run --rm --network vapt_core \
+	  -v "$$PWD/backend/migrations:/srv/migrations:ro" \
 	  -e DATABASE_URL="postgresql+psycopg://$$POSTGRES_USER:$$POSTGRES_PASSWORD@172.30.21.40:5432/$$POSTGRES_DB" \
 	  -e SECRET_KEY="$$SECRET_KEY" vapt-api:dev alembic upgrade head
+
+db-check:                    ## fail if the models and the database have diverged
+	@set -a; . ./.env; set +a; docker run --rm --network vapt_core \
+	  -v "$$PWD/backend/migrations:/srv/migrations:ro" \
+	  -e DATABASE_URL="postgresql+psycopg://$$POSTGRES_USER:$$POSTGRES_PASSWORD@172.30.21.40:5432/$$POSTGRES_DB" \
+	  -e SECRET_KEY="$$SECRET_KEY" vapt-api:dev alembic check
 
 db-seed:                     ## seed accounts, profiles and MOCK-WEB-001 (no grant, no signature)
 	@set -a; . ./.env; set +a; docker run --rm --network vapt_core \

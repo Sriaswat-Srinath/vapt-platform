@@ -49,6 +49,8 @@ class ZapAdapter:
     def preflight(self, spec: ScanJobSpec) -> None:
         if not spec.scope_decision_allowed:
             raise ScopeRefused("refusing to start: the job does not carry an allow ScopeDecision")
+        if spec.mode != "live":
+            raise ScopeRefused("this adapter only runs live work: it contacts the target")
         if not spec.pinned_ips:
             raise ScopeRefused("refusing to start: no pinned target address")
         if spec.profile.active_scan or spec.profile.is_intrusive:

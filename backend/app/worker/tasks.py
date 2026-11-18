@@ -228,13 +228,22 @@ def _ingest(session, *, job: models.ScanJob, asset: models.Asset, adapter_name: 
                 trace_id=job.trace_id))
             rejected += 1
             continue
+        from ..evidence import store as blob_store
+        req_blob = (blob_store.put(session, obs.request_text.encode("utf-8", "replace"),
+                                   media_type="message/http")
+                    if obs.request_text else None)
+        resp_blob = (blob_store.put(session, obs.response_text.encode("utf-8", "replace"),
+                                    media_type="message/http")
+                     if obs.response_text else None)
         session.add(models.RawObservation(
             job_id=job.id, asset_id=asset.id, adapter_name=adapter_name,
             adapter_version=adapter_version, adapter_rule_id=obs.adapter_rule_id,
             payload=obs.payload, payload_sha256=obs.payload_sha256,
             request_sha256=obs.request_sha256, response_sha256=obs.response_sha256,
             observed_url=url[:1024] or None,
-            observed_peer_ip=(job.pinned_ips or [None])[0]))
+            observed_peer_ip=(job.pinned_ips or [None])[0],
+            request_blob_id=req_blob.id if req_blob else None,
+            response_blob_id=resp_blob.id if resp_blob else None))
         stored += 1
     session.flush()
     return stored, rejected
@@ -298,7 +307,7 @@ def run_assessment(self, job_id: str) -> dict[str, Any]:  # noqa: ANN001
         session.commit()
 
         spec = sb.ScanJobSpec(
-            job_id=str(job.id),
+            job_id=str(job.id), mode=job.mode or sp.MODE_LIVE,
             asset=sb.AssetSnapshot(asset_id=str(asset.id), asset_identifier=asset.asset_identifier,
                                    hostname=asset.hostname, protocol=asset.protocol,
                                    port=asset.port, base_path=asset.base_path or "/"),
@@ -404,8 +413,19 @@ def run_assessment(self, job_id: str) -> dict[str, Any]:  # noqa: ANN001
                     cursor = batch.cursor
                 job.observations_count = stored
                 job.coverage_complete = job.stop_reason != "budget_exhausted"
+                session.commit()
+                # ---- normalise -> dedup -> evidence -> validate -> CVSS -----
+                _job_event(session, job, "running", "normalize", "building findings")
+                session.commit()
+                from ..findings_pipeline import process_job
+                fstats = process_job(session, job, asset)
                 _job_event(session, job, "completed", "done",
-                           f"stored {stored} observations, rejected {rejected} out-of-scope")
+                           f"stored {stored} observations, rejected {rejected} out-of-scope; "
+                           f"{fstats['findings_new']} new findings, "
+                           f"{fstats.get('confirmed', 0)} confirmed, "
+                           f"{fstats.get('false_positive', 0)} false positive, "
+                           f"{fstats.get('inconclusive', 0)} inconclusive, "
+                           f"{fstats.get('not_applicable', 0)} not applicable")
                 job.stop_reason = job.stop_reason or "ok"
         except sb.ScopeRefused as exc:
             _job_event(session, job, "blocked", "preflight", f"adapter refused: {exc}")

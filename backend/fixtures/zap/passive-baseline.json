@@ -3,7 +3,8 @@
     "Hand-authored ZAP-shaped alerts for the mock adapter. NOT captured from a live scan:",
     "the authorisation document is unsigned, so no scan has run (CLAUDE.md rules 6-7).",
     "Shapes follow the ZAP /JSON/alert/view/alerts and /JSON/core/view/message responses.",
-    "One alert deliberately names a third-party host so ingestion rejection is exercised."
+    "One alert deliberately names a third-party host so ingestion rejection is exercised.",
+    "Alerts deliberately span all five validation outcomes so the engine's discrimination is demonstrable: a claim contradicted by the stored response is a false positive, a browser header on a JSON endpoint is not applicable, an unmapped rule stays a candidate."
   ],
   "zap_version": "2.17.0",
   "alerts": [
@@ -125,6 +126,108 @@
       "cweid": "693",
       "wascid": "15",
       "messageId": "99"
+    },
+    {
+      "pluginId": "10038",
+      "alertRef": "10038-1",
+      "name": "Content Security Policy (CSP) Header Not Set",
+      "riskdesc": "Medium (High)",
+      "risk": "Medium",
+      "confidence": "High",
+      "url": "http://shop.brakes-vapt.test:3000/api/Products",
+      "method": "GET",
+      "param": "",
+      "evidence": "",
+      "description": "claimed on a JSON endpoint",
+      "solution": "n/a",
+      "cweid": "693",
+      "wascid": "15",
+      "messageId": "21"
+    },
+    {
+      "pluginId": "10021",
+      "alertRef": "10021-1",
+      "name": "X-Content-Type-Options Header Missing",
+      "riskdesc": "Low (Medium)",
+      "risk": "Low",
+      "confidence": "Medium",
+      "url": "http://shop.brakes-vapt.test:3000/users-page",
+      "method": "GET",
+      "param": "x-content-type-options",
+      "evidence": "",
+      "description": "claimed missing where the response sets it",
+      "solution": "n/a",
+      "cweid": "693",
+      "wascid": "15",
+      "messageId": "31"
+    },
+    {
+      "pluginId": "10096",
+      "alertRef": "10096-1",
+      "name": "Timestamp Disclosure - Unix",
+      "riskdesc": "Low (Low)",
+      "risk": "Low",
+      "confidence": "Low",
+      "url": "http://shop.brakes-vapt.test:3000/contact-page",
+      "method": "GET",
+      "param": "",
+      "evidence": "1234567890",
+      "description": "evidence not present in the body",
+      "solution": "n/a",
+      "cweid": "200",
+      "wascid": "13",
+      "messageId": "32"
+    },
+    {
+      "pluginId": "40012",
+      "alertRef": "40012-1",
+      "name": "Cross Site Scripting (Reflected)",
+      "riskdesc": "High (Medium)",
+      "risk": "High",
+      "confidence": "Medium",
+      "url": "http://shop.brakes-vapt.test:3000/search-page?q=",
+      "method": "GET",
+      "param": "q",
+      "evidence": "<script>vaptprobe()</script>",
+      "description": "payload reflected unencoded",
+      "solution": "Encode output.",
+      "cweid": "79",
+      "wascid": "8",
+      "messageId": "33"
+    },
+    {
+      "pluginId": "40012",
+      "alertRef": "40012-1",
+      "name": "Cross Site Scripting (Reflected)",
+      "riskdesc": "High (Medium)",
+      "risk": "High",
+      "confidence": "Medium",
+      "url": "http://shop.brakes-vapt.test:3000/feedback-page?comment=",
+      "method": "GET",
+      "param": "comment",
+      "evidence": "<script>enc()</script>",
+      "description": "payload reflected but encoded",
+      "solution": "n/a",
+      "cweid": "79",
+      "wascid": "8",
+      "messageId": "34"
+    },
+    {
+      "pluginId": "90999",
+      "alertRef": "90999-1",
+      "name": "Experimental Rule Nobody Mapped",
+      "riskdesc": "Medium (Low)",
+      "risk": "Medium",
+      "confidence": "Low",
+      "url": "http://shop.brakes-vapt.test:3000/robots.txt",
+      "method": "GET",
+      "param": "",
+      "evidence": "",
+      "description": "an unmapped scanner rule",
+      "solution": "n/a",
+      "cweid": "0",
+      "wascid": "0",
+      "messageId": "35"
     }
   ],
   "messages": {
@@ -151,6 +254,36 @@
       "requestBody": "",
       "responseHeader": "HTTP/1.1 200 OK\r\nContent-Type: application/javascript\r\n\r\n",
       "responseBody": "//..."
+    },
+    "31": {
+      "requestHeader": "GET /users-page HTTP/1.1\r\nHost: shop.brakes-vapt.test:3000\r\n\r\n",
+      "requestBody": "",
+      "responseHeader": "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nX-Content-Type-Options: nosniff\r\n\r\n",
+      "responseBody": "<!doctype html><html><body>users</body></html>"
+    },
+    "32": {
+      "requestHeader": "GET /contact-page HTTP/1.1\r\nHost: shop.brakes-vapt.test:3000\r\n\r\n",
+      "requestBody": "",
+      "responseHeader": "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
+      "responseBody": "<!doctype html><html><body>no timestamp here</body></html>"
+    },
+    "33": {
+      "requestHeader": "GET /search-page?q=%3Cscript%3Evaptprobe()%3C/script%3E HTTP/1.1\r\nHost: shop.brakes-vapt.test:3000\r\n\r\n",
+      "requestBody": "",
+      "responseHeader": "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
+      "responseBody": "<!doctype html><html><body>results for <script>vaptprobe()</script></body></html>"
+    },
+    "34": {
+      "requestHeader": "GET /feedback-page?comment=%3Cscript%3Eenc()%3C/script%3E HTTP/1.1\r\nHost: shop.brakes-vapt.test:3000\r\n\r\n",
+      "requestBody": "",
+      "responseHeader": "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
+      "responseBody": "<!doctype html><html><body>you said &lt;script&gt;enc()&lt;/script&gt;</body></html>"
+    },
+    "35": {
+      "requestHeader": "GET /robots.txt HTTP/1.1\r\nHost: shop.brakes-vapt.test:3000\r\n\r\n",
+      "requestBody": "",
+      "responseHeader": "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n",
+      "responseBody": "User-agent: *\nDisallow: /ftp\n"
     }
   }
 }

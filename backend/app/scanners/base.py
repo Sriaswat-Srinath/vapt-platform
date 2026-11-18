@@ -61,6 +61,10 @@ class ProfileSnapshot:
 class ScanJobSpec:
     """Built ONLY from a persisted allow ScopeDecision."""
     job_id: str
+    # `fixture` replays recorded data and contacts nothing, so it needs no
+    # resolved target. `live` touches the target and therefore MUST carry a
+    # pinned address (ADR-0006). Adapters enforce this per mode.
+    mode: str
     asset: AssetSnapshot
     profile: ProfileSnapshot
     pinned_ips: tuple[str, ...]

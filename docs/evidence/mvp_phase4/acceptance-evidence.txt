@@ -1,0 +1,37 @@
+=== MVP phase 4 acceptance evidence 2026-11-18T07:58:37Z
+
+--- assessment lifecycle (fixture mode, mock adapter, zero network)
+    state=completed mode=fixture phase=done adapter=mock stop=ok coverage=True
+    queued     preflight job accepted after an allow ScopeDecision
+    preflight  preflight worker claimed the job
+    running    preflight adapter needs no shared session
+    running    spider    scan started
+    running    collect   collecting observations
+    completed  done      stored 6 observations, rejected 1 out-of-scope
+    completed  done      teardown confirmed: mock session discarded; stores empty
+
+--- raw observations: verbatim, hashed, provenance-carrying
+    stored=6 rejected_at_ingestion=1
+    REJECTED [host_mismatch] http://cdn.example.com/lib.js
+    rule=10038  http://shop.brakes-vapt.test:3000/             payload=6368545d4c req=2943fce8 resp=21572c09
+    rule=10038  http://shop.brakes-vapt.test:3000/login        payload=bfdf54877d req=31683605 resp=ef1b9048
+    rule=10020  http://shop.brakes-vapt.test:3000/             payload=d624cd05fc req=2943fce8 resp=21572c09
+    rule=10021  http://shop.brakes-vapt.test:3000/             payload=f133f065b3 req=2943fce8 resp=21572c09
+    rule=10096  http://shop.brakes-vapt.test:3000/api/Products payload=d911a2768c req=dfdfa246 resp=d0f5ccb9
+    rule=10015  http://shop.brakes-vapt.test:3000/login        payload=e429eacc99 req=31683605 resp=ef1b9048
+
+--- scanner state and the delegated, verification-gated reset
+    adapters: {"mock": "available", "zap": "disabled (ZAP_ADAPTER_ENABLED=false)"} default: mock
+    daemon_state: [{"adapter": "mock", "is_dirty": false, "dirty_reason": null, "dirty_since": null, "requires_operator_restart": false, "last_reset_at": "2026-11-18T07:54:22.683655+00:00"}, {"adapter": "zap", "is_dirty": false, "dirty_reason": null, "dirty_since": null, "requires_operator_restart": false, "last_reset_at": "2026-11-18T07:54:23.741577+00:00"}]
+    held_leases: []
+    reset cleared_dirty=True failing_step=None
+    R2 pass=True version=2.17.0
+    R4 pass=True newSession
+    R5 pass=True alerts=0 sites=0 messages=0
+    R6 pass=True context create/read/remove
+    R7 pass=True marker=vapt-instance-1794988463
+
+--- live assessment still denied, and ZAP has scanned nothing
+    HTTP 409 Gate 'scanner_execution_enabled' failed | mode: live
+    ZAP stores: (True, 'alerts=0 sites=0 messages=0')
+    ZAP active: [] spider: []

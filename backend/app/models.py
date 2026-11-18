@@ -11,7 +11,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any
 from sqlalchemy import (JSON, BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey,
-                        Identity, Integer, String, Text, UniqueConstraint, func)
+                        Identity, Integer, Numeric, String, Text, UniqueConstraint, func)
 from sqlalchemy.dialects.postgresql import ARRAY, INET, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from .ids import uuid7
@@ -517,6 +517,11 @@ class RawObservation(Base):
     response_sha256: Mapped[str | None] = mapped_column(String(64))
     observed_url: Mapped[str | None] = mapped_column(String(1024))
     observed_peer_ip: Mapped[str | None] = mapped_column(String(45))
+    # The request/response bytes live in the content-addressed blob store, not
+    # in this JSONB payload: unredacted material belongs in exactly one place
+    # behind the admin-only endpoint (ADR-0011).
+    request_blob_id: Mapped[Any | None] = mapped_column(UUID(as_uuid=True))
+    response_blob_id: Mapped[Any | None] = mapped_column(UUID(as_uuid=True))
 
 
 class IngestionRejection(Base):
@@ -532,3 +537,190 @@ class IngestionRejection(Base):
     observed_peer_ip: Mapped[str | None] = mapped_column(String(45))
     payload_sha256: Mapped[str | None] = mapped_column(String(64))
     trace_id: Mapped[str | None] = mapped_column(String(64))
+
+
+# ------------------------------------------------ catalogue / findings --------
+class VulnCatalogue(Base):
+    """Curated vulnerability classes. The ONLY default source of CVSS.
+
+    Human-maintained; never written by an LLM and never by normalisation
+    (ADR-0004). A scanner rule with no catalogue entry still produces a finding,
+    with a null catalogue key, surfaced separately rather than silently dropped.
+    """
+    __tablename__ = "vuln_catalogue"
+    id: Mapped[Any] = _pk()
+    key: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    category: Mapped[str] = mapped_column(String(60), nullable=False)
+    cwe_ids: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+    default_severity: Mapped[str] = mapped_column(String(16), nullable=False)
+    cvss_version: Mapped[str | None] = mapped_column(String(8))
+    cvss_vector: Mapped[str | None] = mapped_column(String(120))
+    cvss_base: Mapped[float | None] = mapped_column(Numeric(3, 1))
+    remediation_md: Mapped[str] = mapped_column(Text, nullable=False)
+    references: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    catalogue_version: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_at: Mapped[dt.datetime] = _now()
+
+
+class Finding(Base):
+    __tablename__ = "findings"
+    id: Mapped[Any] = _pk()
+    asset_id: Mapped[Any] = mapped_column(UUID(as_uuid=True), ForeignKey("assets.id"), nullable=False)
+    job_id: Mapped[Any | None] = mapped_column(UUID(as_uuid=True), ForeignKey("scan_jobs.id"))
+    catalogue_key: Mapped[str | None] = mapped_column(String(80))
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    category: Mapped[str] = mapped_column(String(60), nullable=False)
+    endpoint_id: Mapped[Any | None] = mapped_column(UUID(as_uuid=True), ForeignKey("endpoints.id"))
+    affected_url: Mapped[str] = mapped_column(String(1024), nullable=False)
+    http_method: Mapped[str] = mapped_column(String(10), nullable=False)
+    parameter_name: Mapped[str | None] = mapped_column(String(200))
+    severity: Mapped[str] = mapped_column(String(16), nullable=False)
+    confidence: Mapped[str] = mapped_column(String(20), nullable=False)
+    description_md: Mapped[str | None] = mapped_column(Text)
+    remediation_md: Mapped[str | None] = mapped_column(Text)
+    detection_source: Mapped[str] = mapped_column(String(20), nullable=False)
+    validation_state: Mapped[str] = mapped_column(String(20), default="candidate", nullable=False)
+    validation_rule_id: Mapped[str | None] = mapped_column(String(80))
+    validation_version: Mapped[str | None] = mapped_column(String(20))
+    coverage_complete: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    occurrence_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    unmapped_rule_id: Mapped[str | None] = mapped_column(String(60))
+    quarantined_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    quarantine_reason: Mapped[str | None] = mapped_column(Text)
+    suppressed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    suppression_reason: Mapped[str | None] = mapped_column(Text)
+    first_seen_at: Mapped[dt.datetime] = _now()
+    last_seen_at: Mapped[dt.datetime] = _now()
+    __table_args__ = (
+        UniqueConstraint("asset_id", "fingerprint", name="uq_finding_fingerprint"),
+        CheckConstraint("validation_state in ('candidate','confirmed','false_positive',"
+                        "'inconclusive','not_applicable')", name="ck_finding_validation_state"),
+        CheckConstraint("severity in ('informational','low','medium','high','critical')",
+                        name="ck_finding_severity"),
+    )
+
+
+class FindingObservation(Base):
+    """Provenance: every finding traces to >=1 immutable raw observation."""
+    __tablename__ = "finding_observations"
+    finding_id: Mapped[Any] = mapped_column(UUID(as_uuid=True), ForeignKey("findings.id"),
+                                            primary_key=True)
+    raw_observation_id: Mapped[Any] = mapped_column(UUID(as_uuid=True),
+                                                    ForeignKey("raw_observations.id"),
+                                                    primary_key=True)
+    created_at: Mapped[dt.datetime] = _now()
+
+
+class EvidenceBlob(Base):
+    """Content-addressed store for unredacted originals. One blob, many
+    evidence rows, so reference counting is mandatory (ADR-0011 R2 §7)."""
+    __tablename__ = "evidence_blobs"
+    id: Mapped[Any] = _pk()
+    content_sha256: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    byte_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    media_type: Mapped[str | None] = mapped_column(String(120))
+    storage_path: Mapped[str] = mapped_column(String(512), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), default="present", nullable=False,
+                                       server_default="present")
+    created_at: Mapped[dt.datetime] = _now()
+    last_verified_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    purged_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (CheckConstraint("state in ('present','pending_delete','purged','missing')",
+                                      name="ck_blob_state"),)
+
+
+class Evidence(Base):
+    __tablename__ = "evidence"
+    id: Mapped[Any] = _pk()
+    finding_id: Mapped[Any] = mapped_column(UUID(as_uuid=True), ForeignKey("findings.id"),
+                                            nullable=False)
+    raw_observation_id: Mapped[Any | None] = mapped_column(UUID(as_uuid=True),
+                                                           ForeignKey("raw_observations.id"))
+    blob_id: Mapped[Any | None] = mapped_column(UUID(as_uuid=True),
+                                                ForeignKey("evidence_blobs.id"))
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    label: Mapped[str] = mapped_column(String(200), nullable=False)
+    content_redacted: Mapped[str | None] = mapped_column(Text)
+    content_sha256: Mapped[str | None] = mapped_column(String(64))
+    redacted_sha256: Mapped[str | None] = mapped_column(String(64))
+    redaction_version: Mapped[str | None] = mapped_column(String(20))
+    redaction_report: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    media_type: Mapped[str | None] = mapped_column(String(120))
+    blob_purged_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    collected_at: Mapped[dt.datetime] = _now()
+    collected_by: Mapped[str] = mapped_column(String(16), default="system", nullable=False)
+    __table_args__ = (CheckConstraint(
+        "kind in ('http_request','http_response','header_set','dom_snapshot','diff',"
+        "'screenshot','tool_log','reproduction_note')", name="ck_evidence_kind"),)
+
+
+class EvidencePin(Base):
+    """Explicit pin rows created when a report cites evidence. `pins_blob`
+    defaults false: a report pins redacted text, so generating one does NOT
+    extend the life of unredacted material (ADR-0011 R2 §9)."""
+    __tablename__ = "evidence_pins"
+    id: Mapped[Any] = _pk()
+    report_id: Mapped[Any | None] = mapped_column(UUID(as_uuid=True))
+    report_artifact_id: Mapped[Any | None] = mapped_column(UUID(as_uuid=True))
+    evidence_id: Mapped[Any] = mapped_column(UUID(as_uuid=True), ForeignKey("evidence.id"),
+                                             nullable=False)
+    pins_blob: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False,
+                                            server_default="false")
+    created_at: Mapped[dt.datetime] = _now()
+    released_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    release_reason: Mapped[str | None] = mapped_column(Text)
+
+
+class ValidationEvent(Base):
+    """Append-only classification history. An AGENT may never be the actor:
+    enforced by a CHECK constraint, not by convention (ADR-0003)."""
+    __tablename__ = "validation_events"
+    id: Mapped[Any] = _pk()
+    finding_id: Mapped[Any] = mapped_column(UUID(as_uuid=True), ForeignKey("findings.id"),
+                                            nullable=False)
+    at: Mapped[dt.datetime] = _now()
+    from_state: Mapped[str | None] = mapped_column(String(20))
+    to_state: Mapped[str] = mapped_column(String(20), nullable=False)
+    rule_id: Mapped[str | None] = mapped_column(String(80))
+    rule_version: Mapped[str | None] = mapped_column(String(20))
+    rule_inputs: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    evidence_ids: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+    actor_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    actor_id: Mapped[str | None] = mapped_column(String(64))
+    justification: Mapped[str | None] = mapped_column(Text)
+    note: Mapped[str | None] = mapped_column(Text)
+    __table_args__ = (
+        CheckConstraint("actor_kind in ('human','system')", name="ck_validation_actor_not_agent"),
+        CheckConstraint("actor_kind <> 'human' or justification is not null",
+                        name="ck_validation_human_requires_justification"),
+    )
+
+
+class RiskScore(Base):
+    """CVSS stored separately from any platform prioritisation (ADR-0004).
+
+    The MVP deliberately does NOT compute a priority score: those columns stay
+    null rather than being filled with a premature formula.
+    """
+    __tablename__ = "risk_scores"
+    id: Mapped[Any] = _pk()
+    finding_id: Mapped[Any] = mapped_column(UUID(as_uuid=True), ForeignKey("findings.id"),
+                                            nullable=False)
+    computed_at: Mapped[dt.datetime] = _now()
+    cvss_source: Mapped[str | None] = mapped_column(String(20))
+    cvss_version: Mapped[str | None] = mapped_column(String(8))
+    cvss_vector: Mapped[str | None] = mapped_column(String(120))
+    cvss_base: Mapped[float | None] = mapped_column(Numeric(3, 1))
+    epss_score: Mapped[float | None] = mapped_column(Numeric(5, 4))
+    epss_asof: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    kev_listed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False,
+                                             server_default="false")
+    priority_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
+    priority_band: Mapped[str | None] = mapped_column(String(4))
+    formula_version: Mapped[str | None] = mapped_column(String(20))
+    inputs: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    __table_args__ = (CheckConstraint("cvss_source is null or cvss_source in "
+                                      "('catalogue','scanner_mapping','analyst')",
+                                      name="ck_cvss_source"),)

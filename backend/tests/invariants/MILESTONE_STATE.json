@@ -1,1 +1,2 @@
-{"landed": ["M0", "M1"], "note": "Updated only when a milestone is accepted by the project owner. Drives the invariant manifest test."}
+{"landed": ["M0", "M1", "M1.5", "P1", "P2", "P3", "P4", "P5"],
+ "note": "Updated only when a phase is delivered and its report written. Drives the invariant manifest test: an invariant still skipped after its phase has landed is a FAILURE."}

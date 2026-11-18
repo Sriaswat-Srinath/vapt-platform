@@ -1,0 +1,4 @@
+proxy decision log: 60 lines (0 startup event, 60 decisions)
+ verdicts: {'allow': 12, 'closed': 12, 'deny': 36}
+ deny reasons: {'destination_not_allowlisted': 24, 'method_not_connect': 12}
+ allowed destinations: ['llm-standin:8443']

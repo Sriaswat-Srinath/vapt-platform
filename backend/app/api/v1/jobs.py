@@ -115,3 +115,28 @@ def raw_observations(job_id: str, limit: int = 50, session: Session = Depends(ge
                           "captured_at": r.captured_at,
                           "payload": r.payload} for r in rows],
     }
+
+
+@router.post("/assessments/{job_id}/revalidate")
+def revalidate(job_id: str, session: Session = Depends(get_session),
+               p: Principal = Depends(require_role("analyst")),
+               trace: str = Depends(trace_id)):
+    """Re-run normalisation and the deterministic validation engine over the
+    stored observations.
+
+    Possible because raw observations are immutable and the pipeline is a
+    function of stored inputs (ADR-0002): an improved mapper or rule pack can be
+    applied to a historical assessment, and the delta is recorded as new
+    validation events. The engine is the only actor; no LLM is involved.
+    """
+    job = session.get(models.ScanJob, job_id)
+    if job is None:
+        raise errors.not_found("Assessment")
+    asset = session.get(models.Asset, job.asset_id)
+    from ...findings_pipeline import process_job
+    stats = process_job(session, job, asset)
+    audit.record(session, action="assessment_revalidated", actor_kind="human", actor_id=p.id,
+                 outcome="ok", subject_type="scan_job", subject_id=str(job.id), trace_id=trace,
+                 detail=stats)
+    session.commit()
+    return {"job_id": str(job.id), "coverage_complete": job.coverage_complete, "stats": stats}

@@ -1,0 +1,42 @@
+=== MVP phase 3 acceptance evidence 2026-11-18T06:30:37Z
+
+--- attack surface (from fixture discovery, zero network requests)
+    counts: {"endpoints": 13, "parameters": 13, "forms": 4, "security_headers_observed": 60, "security_headers_missing": 59, "candidate_tests": 26, "api_endpoints": 7, "auth_entry_points": 3}
+    by_assessment: {"verified": 9, "inferred": 4}
+    auth: login_form       GET   /login
+    auth: register         GET   /register
+    auth: login_form       POST  /rest/user/login
+    GET   200  api=F verified   /
+    POST  -    api=T inferred   /api/Feedbacks
+    GET   200  api=T verified   /api/Products
+    GET   401  api=T verified   /api/Users
+    POST  -    api=T inferred   /api/Users
+    GET   200  api=F verified   /contact
+    GET   200  api=F verified   /ftp
+    GET   200  api=F verified   /login
+    GET   200  api=F verified   /register
+    GET   -    api=T inferred   /rest/products/search
+    POST  -    api=T inferred   /rest/user/login
+    GET   200  api=T verified   /rest/user/whoami
+    GET   200  api=F verified   /robots.txt
+
+--- candidate tests (deterministic matrix)
+    matrix_version: 1.0.0 total: 26
+    passive   authentication_weaknesses    login_form           -> zap-passive
+    passive   broken_access_control        user_api             -> zap-passive
+    passive   data_exposure                api_endpoint         -> zap-passive
+    INTRUSIVE file_handling                file_upload          -> None
+    INTRUSIVE injection                    query_parameter      -> zap-active-intrusive
+    passive   input_validation             registration_form    -> zap-passive
+    passive   security_misconfiguration    response_headers     -> zap-passive
+
+--- live discovery denial
+    HTTP 409 Gate 'scanner_execution_enabled' failed
+    first failing gate: scanner_execution_enabled
+
+--- worker reachability (must reach the lab, nothing else)
+    internet: OSError
+    egress-proxy: OSError
+    api: OSError
+    lab-target: REACHABLE
+    zap: REACHABLE

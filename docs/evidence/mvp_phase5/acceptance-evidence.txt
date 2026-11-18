@@ -1,0 +1,68 @@
+=== MVP phase 5 acceptance evidence 2026-11-18T11:18:19Z
+
+--- findings summary
+    total: 12
+    by_validation_state: {"confirmed": 7, "not_applicable": 1, "false_positive": 3, "candidate": 1}
+    by_severity: {"low": 4, "medium": 5, "high": 2, "informational": 1}
+    unmapped_detections: 1
+    Severity is the scanner's normalised risk. CVSS comes from the curated catalogue. No platform prioritisation score is computed in this MVP.
+
+--- findings (the engine discriminating, not confirming everything)
+    candidate       medium        cvss=None  Experimental Rule Nobody Mapped          -vapt.test:3000/robots.txt
+    confirmed       medium        cvss=5.0   Content Security Policy (CSP) Header Not rakes-vapt.test:3000/login
+    confirmed       medium        cvss=5.0   Content Security Policy (CSP) Header Not hop.brakes-vapt.test:3000/
+    confirmed       high          cvss=6.1   Cross Site Scripting (Reflected)         pt.test:3000/search-page?q
+    confirmed       medium        cvss=3.1   Missing Anti-clickjacking Header         hop.brakes-vapt.test:3000/
+    confirmed       informational cvss=None  Re-examine Cache-control Directives      rakes-vapt.test:3000/login
+    confirmed       low           cvss=3.7   Timestamp Disclosure - Unix              apt.test:3000/api/Products
+    confirmed       low           cvss=3.1   X-Content-Type-Options Header Missing    hop.brakes-vapt.test:3000/
+    false_positive  high          cvss=6.1   Cross Site Scripting (Reflected)         3000/feedback-page?comment
+    false_positive  low           cvss=3.7   Timestamp Disclosure - Unix              apt.test:3000/contact-page
+    false_positive  low           cvss=3.1   X-Content-Type-Options Header Missing    -vapt.test:3000/users-page
+    not_applicable  medium        cvss=5.0   Content Security Policy (CSP) Header Not apt.test:3000/api/Products
+
+--- one finding in full: provenance, evidence, validation history, CVSS
+    title: Cross Site Scripting (Reflected)
+    fingerprint: 5cc58ce2b310316f8274d48f ...
+    validation: {"state": "confirmed", "rule_id": "reflected-input", "rule_version": "1.0.0"}
+    cvss: {"source": "catalogue", "version": "3.1", "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N", "base": 6.1}  priority_score: None
+    epss: None  kev: False
+    provenance:
+      adapter=mock rule=40012 payload_sha256=29ff6441f65e6715
+      adapter=mock rule=40012 payload_sha256=29ff6441f65e6715
+      adapter=mock rule=40012 payload_sha256=29ff6441f65e6715
+      adapter=mock rule=40012 payload_sha256=29ff6441f65e6715
+      adapter=mock rule=40012 payload_sha256=29ff6441f65e6715
+      adapter=mock rule=40012 payload_sha256=29ff6441f65e6715
+      adapter=mock rule=40012 payload_sha256=29ff6441f65e6715
+      adapter=mock rule=40012 payload_sha256=29ff6441f65e6715
+      adapter=mock rule=40012 payload_sha256=29ff6441f65e6715
+      adapter=mock rule=40012 payload_sha256=29ff6441f65e6715
+      adapter=mock rule=40012 payload_sha256=29ff6441f65e6715
+      adapter=mock rule=40012 payload_sha256=29ff6441f65e6715
+      adapter=mock rule=40012 payload_sha256=29ff6441f65e6715
+      adapter=mock rule=40012 payload_sha256=29ff6441f65e6715
+      adapter=mock rule=40012 payload_sha256=29ff6441f65e6715
+    evidence:
+      http_request   redaction=1.0.0 unredacted_original=True counts={}
+      http_response  redaction=1.0.0 unredacted_original=True counts={}
+    validation history:
+      system  candidate      -> confirmed      reflected-input :: the payload is reflected unencoded in an HTML context
+      human   confirmed      -> false_positive analyst-override :: analyst override
+      human   false_positive -> confirmed      analyst-override :: analyst override
+      human   confirmed      -> false_positive analyst-override :: analyst override
+      human   false_positive -> confirmed      analyst-override :: analyst override
+      human   confirmed      -> false_positive analyst-override :: analyst override
+      human   false_positive -> confirmed      analyst-override :: analyst override
+      human   confirmed      -> false_positive analyst-override :: analyst override
+      human   false_positive -> confirmed      analyst-override :: analyst override
+
+--- evidence redaction (analyst view)
+    redacted: True version: 1.0.0
+      GET /search-page?q=%3Cscript%3Evaptprobe()%3C/script%3E HTTP/1.1
+      Host: shop.brakes-vapt.test:3000
+
+--- unredacted original: analyst denied, admin needs a justification
+    analyst raw -> HTTP 403
+    admin raw, no justification -> HTTP 400
+    admin raw, with justification -> HTTP 200 (audited)

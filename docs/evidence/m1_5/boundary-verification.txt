@@ -1,0 +1,24 @@
+=== M1.5 boundary verification 2026-11-17T11:07:45Z
+-- no scan performed (asked of the ZAP daemon itself)
+   active scans : {"scans":[]}
+   spider scans : {"scans":[]}
+   alerts       : {"numberOfAlerts":"0"}
+   sites        : {"sites":[]}
+   messages     : {"numberOfMessages":"0"}
+-- safety flags
+   SCANNER_EXECUTION_ENABLED=false
+   ZAP_ADAPTER_ENABLED=false
+   ACTIVE_SCAN_ENABLED=false
+   DUAL_CONTROL_AVAILABLE=false
+   DEFAULT_SCANNER_ADAPTER=mock
+-- no real LLM provider contacted (proxy decision log)
+   decisions: {None: 1, 'allow': 12, 'closed': 12, 'deny': 36}
+   permitted destinations: ['llm-standin:8443']
+   deny reasons: {'destination_not_allowlisted': 24, 'method_not_connect': 12}
+-- authorisation document
+   byte-identical to commit 83497ce; sha256=b122cf30cdf2c93c…
+   UNSIGNED DRAFT markers: 1
+-- no scope grant
+   "scope_grant": null
+-- M1 archived evidence untouched
+   unchanged since 9c988ba

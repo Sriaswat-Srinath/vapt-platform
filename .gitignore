@@ -13,11 +13,15 @@ secrets/
 !docs/**
 
 # --- evidence, scanner output, reports (never committed) ---
-evidence/
-blobs/
-var/
-data/
-reports/out/
+# NOTE: these are ANCHORED on purpose. A bare `evidence/` also matched the
+# source package backend/app/evidence/, silently excluding real code from the
+# repository. Keep runtime paths anchored and never pattern-match a bare
+# directory name that could collide with a Python package.
+/evidence/
+/blobs/
+/var/
+/data/
+/reports/out/
 *.har
 zap-report.*
 zap-session*

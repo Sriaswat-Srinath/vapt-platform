@@ -1,0 +1,42 @@
+=== MVP phase 2 acceptance evidence  2026-11-18T06:14:33Z
+
+--- gate chain, full dry run (zap-passive on MOCK-WEB-001)
+    decision=deny policy_version=1.0.0
+    DENY  scanner_execution_enabled    SCANNER_EXECUTION_ENABLED is false; scanner execution is disabled
+    PASS  lab_isolation_valid          
+    PASS  asset_registered             
+    PASS  environment_is_mock          
+    DENY  grant_active                 scope grant state is 'draft', not 'active'
+    PASS  profile_allowed              
+    PASS  intrusive_approval           
+    DENY  target_resolution            resolution failed: not resolvable from the API (gaierror); the scanner worker performs resolve-once-
+    PASS  port_allowed                 
+    PASS  scope_rules                  
+    PASS  concurrency_budget           
+    PASS  no_conflicting_job           
+    PASS  scanner_daemon_available     
+
+--- external target registration attempts (all must be rejected)
+    example.com -> HTTP 409 | 'example.com' is not a reserved .test lab hostname (RFC 6761)
+    93.184.216.34 -> HTTP 409 | 93.184.216.34 is an IP literal outside the lab subnet 172.30.10.0/24; 93.184.216.34 resolv
+    scanme.nmap.org -> HTTP 409 | 'scanme.nmap.org' is not a reserved .test lab hostname (RFC 6761)
+    localhost -> HTTP 409 | 'localhost' is not a reserved .test lab hostname (RFC 6761); localhost resolves to ['127.0
+    172.30.21.40 -> HTTP 409 | 172.30.21.40 is an IP literal outside the lab subnet 172.30.10.0/24; 172.30.21.40 resolves
+
+--- assessment creation (must be denied, no job row created)
+    POST assessments -> HTTP 409
+    first failing gate: scanner_execution_enabled
+    jobs for this asset: 0
+
+--- database-level invariants
+    I14: ERROR:  asset identity is immutable (environment, hostname, protocol, port, asset_identifier); re-register instead
+    audit: ERROR:  audit_log is append-only
+    env CHECK: ERROR:  new row for relation "assets" violates check constraint "ck_asset_environment_mock_lab"
+
+--- audit chain
+    {"ok":true,"entries":22,"head":"eca494442c272b0c5fb036a7986918a3d4f08e618d3f441c1643c25b199939fc"}
+--- capabilities
+    scanner_execution_enabled: False
+    active_scan_enabled: False
+    dual_control effective: False | attested identities: 0
+    llm_enabled: False

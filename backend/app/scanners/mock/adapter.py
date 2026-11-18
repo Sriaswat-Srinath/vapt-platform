@@ -37,8 +37,11 @@ class MockAdapter:
     def preflight(self, spec: ScanJobSpec) -> None:
         if not spec.scope_decision_allowed:
             raise ScopeRefused("refusing to start: the job does not carry an allow ScopeDecision")
-        if not spec.pinned_ips:
-            raise ScopeRefused("refusing to start: no pinned target address")
+        # Fixture work makes no network contact, so it must NOT require a
+        # resolvable target: requiring one would couple the fixture path to the
+        # lab being up, which is exactly what fixture mode exists to avoid.
+        if spec.mode == "live" and not spec.pinned_ips:
+            raise ScopeRefused("refusing to start live work: no pinned target address")
 
     def start(self, spec: ScanJobSpec) -> ScannerHandle:
         self.preflight(spec)

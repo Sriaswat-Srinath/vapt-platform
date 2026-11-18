@@ -1,0 +1,22 @@
+=== MVP phase 1 boundary verification 2026-11-18T05:45:27Z
+-- no scan performed (asked of the ZAP daemon)
+   {"scans":[]}
+   {"scans":[]}
+   {"numberOfAlerts":"0"}
+   {"sites":[]}
+   {"numberOfMessages":"0"}
+-- safety flags
+   SCANNER_EXECUTION_ENABLED=false
+   ZAP_ADAPTER_ENABLED=false
+   ACTIVE_SCAN_ENABLED=false
+   DUAL_CONTROL_AVAILABLE=false
+   DEFAULT_SCANNER_ADAPTER=mock
+-- authorisation document
+   byte-identical to 83497ce, still UNSIGNED DRAFT
+-- no scope grant
+   "scope_grant": null
+-- real datastores: no egress path
+   vapt_postgres    default_route=NONE
+   vapt_redis       default_route=NONE
+-- no application endpoints exist yet
+   backend/app/ does not exist (no FastAPI code)
