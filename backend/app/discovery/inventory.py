@@ -74,7 +74,9 @@ def record_response(session: Session, *, asset: models.Asset, run: models.Discov
     for name in extractors.query_parameter_names(url):
         _upsert_param(session, endpoint, name, "query", "discovered")
 
-    for header in extractors.SECURITY_HEADERS:
+    # Set-Cookie is recorded like a security header: its PRESENCE and the
+    # attributes on it are the observation; the cookie value is never stored.
+    for header in (*extractors.SECURITY_HEADERS, "set-cookie"):
         present = header in headers
         row = session.execute(select(models.ResponseHeader).where(
             models.ResponseHeader.endpoint_id == endpoint.id,
@@ -153,16 +155,28 @@ def build_candidates(session: Session, *, asset: models.Asset,
         for f in forms:
             fields += session.execute(select(models.FormField).where(
                 models.FormField.form_id == f.id)).scalars().all()
+        # Only the SECURITY_HEADERS set counts as "missing": an absent
+        # Set-Cookie is not a missing security header, it is simply no cookie.
         missing = tuple(h.header_name for h in session.execute(select(models.ResponseHeader).where(
             models.ResponseHeader.endpoint_id == ep.id,
-            models.ResponseHeader.present.is_(False))).scalars().all())
+            models.ResponseHeader.present.is_(False),
+            models.ResponseHeader.header_name.in_(extractors.SECURITY_HEADERS))).scalars().all())
+        cookie_row = session.execute(select(models.ResponseHeader).where(
+            models.ResponseHeader.endpoint_id == ep.id,
+            models.ResponseHeader.header_name == "set-cookie",
+            models.ResponseHeader.present.is_(True))).scalar_one_or_none()
+        cookie_attrs = extractors.cookie_attributes(
+            cookie_row.header_value_sample if cookie_row else None)
         for cand in classify.candidates_for_endpoint(
                 path=ep.path, method=ep.method, is_api=ep.is_api, api_style=ep.api_style,
                 auth_entry_kind=ep.auth_entry_kind, parameter_names=params,
                 has_login_form=any(f.is_login_candidate for f in forms),
                 has_password_field=any(f.is_password for f in fields),
                 has_file_input=any((f.input_type or "").lower() == "file" for f in fields),
-                missing_security_headers=missing):
+                missing_security_headers=missing,
+                set_cookie_attributes=("present", *cookie_attrs) if cookie_row else (),
+                is_cleartext_transport=(asset.protocol or "http").lower() == "http",
+                requires_auth_guess=bool(ep.requires_auth_guess)):
             exists = session.execute(select(models.CandidateTest).where(
                 models.CandidateTest.asset_id == asset.id,
                 models.CandidateTest.endpoint_id == ep.id,

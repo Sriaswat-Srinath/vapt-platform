@@ -1,0 +1,9 @@
+{
+  "path": "/redirect?to=https%3A%2F%2Fexample.test%2Fdonate",
+  "status": 200,
+  "headers": {
+    "content-type": "text/html; charset=utf-8",
+    "set-cookie": "language=en; Path=/"
+  },
+  "body": "<html><body><p>Redirecting to <a href=\"https://example.test/donate\">the requested destination</a>.</p><script src=\"https://cdn.example.test/analytics.js\"></script></body></html>"
+}

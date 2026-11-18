@@ -16,12 +16,22 @@ import hmac
 import os
 import re
 
-REDACTION_VERSION = "1.0.0"
+REDACTION_VERSION = "1.1.0"
 
 SECRET_NAME = re.compile(
     r"(token|secret|passwd|password|apikey|api[-_]?key|auth|session|jwt|csrf|signature|private)",
     re.I)
 HEADER_LINE = re.compile(r"^([A-Za-z0-9-]+):[ \t]*(.*)$")
+# A value this module already replaced. Redaction must be IDEMPOTENT: a second
+# pass over redacted text has to remove nothing, because the stage-2 boundary
+# (agent/boundary.py) uses exactly that property to decide whether stage 1
+# missed something. Re-redacting a marker would make every payload look unsafe.
+ALREADY_REDACTED = re.compile(r"^<redacted:kind=[a-z_-]+,len=\d+,ref=[^>]*>$")
+MARKER_ANYWHERE = re.compile(r"<redacted:kind=[a-z_-]+,len=\d+,ref=[^>]*>")
+
+
+def _is_marker(value: str) -> bool:
+    return bool(value) and bool(ALREADY_REDACTED.match(value.strip()))
 SENSITIVE_HEADERS = {"authorization", "proxy-authorization", "cookie", "set-cookie"}
 JWT = re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\b")
 PEM = re.compile(r"-----BEGIN [A-Z ]+-----.*?-----END [A-Z ]+-----", re.S)
@@ -86,6 +96,9 @@ def redact(text: str, *, report: RedactionReport | None = None) -> tuple[str, Re
         out_lines: list[str] = []
         for line in text.splitlines(keepends=False):
             m = HEADER_LINE.match(line)
+            if m and ALREADY_REDACTED.match(m.group(2).strip()):
+                out_lines.append(line)
+                continue
             if m and m.group(1).lower() in SENSITIVE_HEADERS:
                 rep.hit(m.group(1).lower())
                 out_lines.append(f"{m.group(1)}: {marker(m.group(1).lower(), m.group(2))}")
@@ -114,6 +127,8 @@ def redact(text: str, *, report: RedactionReport | None = None) -> tuple[str, Re
 
         def _query(mo: re.Match[str]) -> str:
             sep, name, value = mo.group(1), mo.group(2), mo.group(3)
+            if _is_marker(value):
+                return mo.group(0)
             if value and SECRET_NAME.search(name):
                 rep.hit("query_parameter")
                 return f"{sep}{name}={marker('query_parameter', value)}"
@@ -122,6 +137,8 @@ def redact(text: str, *, report: RedactionReport | None = None) -> tuple[str, Re
 
         def _form(mo: re.Match[str]) -> str:
             prefix, name, value = mo.group(1), mo.group(2), mo.group(3)
+            if _is_marker(value):
+                return mo.group(0)
             if value and SECRET_NAME.search(name):
                 rep.hit("form_field")
                 return f"{prefix}{marker('form_field', value)}"
@@ -129,6 +146,8 @@ def redact(text: str, *, report: RedactionReport | None = None) -> tuple[str, Re
         body = FORM_VALUE.sub(_form, body)
 
         def _json_secret(mo: re.Match[str]) -> str:
+            if _is_marker(mo.group(2)):
+                return mo.group(0)
             rep.hit("json_field")
             return f'"{mo.group(1)}": {marker("json_field", mo.group(2))}'
         body = re.sub(r'"([A-Za-z0-9_.-]*(?:token|secret|password|passwd|apikey|api_key|'

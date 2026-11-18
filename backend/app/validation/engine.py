@@ -16,7 +16,7 @@ Nothing here consults an LLM, and the agent cannot reach this module.
 from __future__ import annotations
 import dataclasses as dc
 
-RULES_VERSION = "1.0.0"
+RULES_VERSION = "1.1.0"
 
 CANDIDATE = "candidate"
 CONFIRMED = "confirmed"
@@ -50,6 +50,12 @@ class ValidationInputs:
     has_request_evidence: bool = False
     has_response_evidence: bool = False
     confidence: str = "low"
+    # cookie facts (session management). Attribute NAMES only; a cookie's value
+    # is never read, stored or reasoned about.
+    set_cookie_count: int = 0
+    cookie_attributes_present: tuple[str, ...] = ()
+    cookie_attribute_claimed_missing: str | None = None
+    transport_is_cleartext: bool = False
 
 
 @dc.dataclass(frozen=True, slots=True)
@@ -159,6 +165,42 @@ def _rule_reflected_input(i: ValidationInputs) -> ValidationOutcome:
                              "reflected, but encoded in the response", base)
 
 
+def _rule_cookie_attribute(i: ValidationInputs) -> ValidationOutcome:
+    """Session-management rule pack (1.1.0).
+
+    A cookie attribute is wholly contained in a response the platform has
+    already stored, so the claim is decidable without sending anything. The
+    rule reads attribute NAMES only — never a cookie value.
+    """
+    rid = "cookie-attribute"
+    base = _inputs_dict(i)
+    attr = i.cookie_attribute_claimed_missing
+    if not i.has_response_evidence:
+        return ValidationOutcome(CANDIDATE, rid, RULES_VERSION,
+                                 "no stored response evidence yet", base)
+    if not attr:
+        return ValidationOutcome(INCONCLUSIVE, rid, RULES_VERSION,
+                                 "the scanner named no cookie attribute to check", base)
+    if i.set_cookie_count == 0:
+        return ValidationOutcome(FALSE_POSITIVE, rid, RULES_VERSION,
+                                 "the stored response sets no cookie, so no cookie attribute can "
+                                 "be missing from it", base)
+    present = {a.lower() for a in i.cookie_attributes_present}
+    if attr.lower() in present:
+        return ValidationOutcome(FALSE_POSITIVE, rid, RULES_VERSION,
+                                 f"the stored Set-Cookie carries {attr}", base)
+    if attr.lower() == "secure" and i.transport_is_cleartext:
+        # Honest, and it keeps a plain-HTTP lab from generating noise that a
+        # reader would have to discount by hand.
+        return ValidationOutcome(NOT_APPLICABLE, rid, RULES_VERSION,
+                                 "the target is served over cleartext HTTP, where Secure would "
+                                 "prevent the cookie being sent at all; the transport itself is "
+                                 "the finding", base)
+    return ValidationOutcome(CONFIRMED, rid, RULES_VERSION,
+                             f"the stored Set-Cookie does not carry {attr} "
+                             f"(present: {sorted(present) or 'none'})", base)
+
+
 def _rule_unmapped(i: ValidationInputs) -> ValidationOutcome:
     return ValidationOutcome(CANDIDATE, "unmapped-detection", RULES_VERSION,
                              "no validation rule covers this scanner rule; the detection is kept "
@@ -171,6 +213,7 @@ RULE_PACKS = {
     "header_value": _rule_header_value,
     "pattern_in_body": _rule_pattern_in_body,
     "reflected_input": _rule_reflected_input,
+    "cookie_attribute": _rule_cookie_attribute,
     "missing_form_token": _rule_unmapped,
     "unmapped": _rule_unmapped,
 }

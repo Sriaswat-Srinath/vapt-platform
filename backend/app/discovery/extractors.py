@@ -128,3 +128,21 @@ SECURITY_HEADERS = (
     "content-security-policy", "strict-transport-security", "x-content-type-options",
     "x-frame-options", "referrer-policy", "permissions-policy",
 )
+
+# Cookie attributes carry session-management meaning and are fully observable in
+# a response that has already been collected, so they need no extra request.
+COOKIE_ATTRIBUTES = ("HttpOnly", "Secure", "SameSite")
+
+
+def cookie_attributes(set_cookie: str | None) -> tuple[str, ...]:
+    """Attribute names PRESENT on a Set-Cookie header, in canonical spelling.
+
+    The first `;`-separated segment is the cookie's NAME=VALUE and is discarded
+    without being read: a cookie whose value happens to contain the text
+    "HttpOnly" must not be reported as carrying the attribute.
+    """
+    if not set_cookie:
+        return ()
+    segments = [seg.strip() for seg in set_cookie.split(";")[1:]]
+    names = {seg.split("=", 1)[0].strip().lower() for seg in segments if seg}
+    return tuple(a for a in COOKIE_ATTRIBUTES if a.lower() in names)

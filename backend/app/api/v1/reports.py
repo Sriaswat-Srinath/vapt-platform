@@ -20,7 +20,7 @@ def templates(p: Principal = Depends(require_role("analyst", "approver"))):
     return [{"key": assembler.TEMPLATE_KEY, "version": assembler.TEMPLATE_VERSION,
              "sections": ["executive_summary", "scope", "methodology", "attack_surface",
                           "vulnerability_summary", "findings", "risk_prioritisation",
-                          "remediation", "limitations"],
+                          "remediation", "coverage", "limitations"],
              "formats": ["html", "json", "pdf"],
              "note": ("HTML and JSON are always produced. PDF is attempted and recorded as "
                       "unavailable with a reason if its native libraries are absent.")}]

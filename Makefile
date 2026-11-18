@@ -146,5 +146,14 @@ frontend-unpublish:          ## stop the dashboard forwarder
 	@if [ -f .lab-state/publish-frontend.pid ]; then kill $$(cat .lab-state/publish-frontend.pid) 2>/dev/null; \
 	  rm -f .lab-state/publish-frontend.pid; echo "stopped"; else echo "not running"; fi
 
+test-agent:                  ## one agent run with LLM_ENABLED=true against the LOCAL stand-in
+	@# The stand-in is the only allowlisted destination and holds no credentials.
+	@# The flag is turned back off afterwards whatever the result.
+	@LLM_ENABLED=true docker compose -f docker-compose.yml up -d --force-recreate api >/dev/null
+	@sleep 9
+	@python3 -m pytest tests/backend/test_agent_phase6.py -q; status=$$?; \
+	  docker compose -f docker-compose.yml up -d --force-recreate api >/dev/null; \
+	  echo "LLM_ENABLED restored to its default (false)"; exit $$status
+
 isolation-report:            ## run lab-check and report the result to the API (admin)
 	@./scripts/report_isolation.sh

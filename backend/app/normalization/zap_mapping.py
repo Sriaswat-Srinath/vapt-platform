@@ -6,7 +6,7 @@ catalogue key and a conservative severity, and is surfaced separately as an
 """
 from __future__ import annotations
 
-MAPPING_VERSION = "1.0.0"
+MAPPING_VERSION = "1.1.0"
 
 # plugin id -> (catalogue key, evidence class)
 #   evidence class drives which validation rule pack applies, and is part of the
@@ -24,7 +24,32 @@ PLUGIN_MAP: dict[str, tuple[str, str]] = {
     "40012": ("reflected-xss", "reflected_input"),
     "40018": ("sql-injection", "reflected_input"),
     "10202": ("missing-anti-csrf-token", "missing_form_token"),
+    # --- session management (1.1.0) ---------------------------------------
+    "10010": ("cookie-missing-httponly", "cookie_attribute"),
+    "10011": ("cookie-missing-secure", "cookie_attribute"),
+    "10054": ("cookie-missing-samesite", "cookie_attribute"),
+    "00003": ("session-id-in-url", "pattern_in_body"),
+    # --- cryptographic failures -------------------------------------------
+    "10041": ("cleartext-credential-transmission", "pattern_in_body"),
+    "10044": ("sensitive-data-in-client-storage", "pattern_in_body"),
+    # --- client-side --------------------------------------------------------
+    "40026": ("dom-xss", "reflected_input"),
+    "90003": ("subresource-without-integrity", "pattern_in_body"),
+    # --- information disclosure ---------------------------------------------
+    "10036": ("server-version-disclosure", "header_value"),
 }
+
+# Which cookie attribute each cookie rule claims is missing. The attribute NAME
+# is what the rule pack checks; the cookie value is never read.
+COOKIE_ATTRIBUTE_CLAIM: dict[str, str] = {
+    "10010": "HttpOnly",
+    "10011": "Secure",
+    "10054": "SameSite",
+}
+
+
+def cookie_attribute_claim(plugin_id: str | None) -> str | None:
+    return COOKIE_ATTRIBUTE_CLAIM.get(str(plugin_id)) if plugin_id else None
 
 ZAP_RISK_TO_SEVERITY = {
     "informational": "informational", "info": "informational",

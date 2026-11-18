@@ -56,4 +56,4 @@ def test_milestone_state_is_committed_and_sane():
     # P7 (dashboard + reports) was delivered before P6 (agent) at the owner's
     # direction, so the set is not contiguous. Only genuinely undelivered
     # phases must be absent.
-    assert "P6" not in landed and "P8" not in landed
+    assert "P8" not in landed

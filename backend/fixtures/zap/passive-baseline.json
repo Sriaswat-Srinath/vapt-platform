@@ -4,7 +4,10 @@
     "the authorisation document is unsigned, so no scan has run (CLAUDE.md rules 6-7).",
     "Shapes follow the ZAP /JSON/alert/view/alerts and /JSON/core/view/message responses.",
     "One alert deliberately names a third-party host so ingestion rejection is exercised.",
-    "Alerts deliberately span all five validation outcomes so the engine's discrimination is demonstrable: a claim contradicted by the stored response is a false positive, a browser header on a JSON endpoint is not applicable, an unmapped rule stays a candidate."
+    "Alerts deliberately span all five validation outcomes so the engine's discrimination is demonstrable: a claim contradicted by the stored response is a false positive, a browser header on a JSON endpoint is not applicable, an unmapped rule stays a candidate.",
+    "Cookie alerts (10010/10054) were added with the taxonomy work: one cookie genuinely lacks",
+    "HttpOnly/SameSite and one carries both, so the session-management rule pack is exercised in",
+    "BOTH directions. Cookie values are the literal string SYNTHETIC-FIXTURE-VALUE."
   ],
   "zap_version": "2.17.0",
   "alerts": [
@@ -228,6 +231,57 @@
       "cweid": "0",
       "wascid": "0",
       "messageId": "35"
+    },
+    {
+      "pluginId": "10010",
+      "alertRef": "10010-1",
+      "name": "Cookie No HttpOnly Flag",
+      "riskdesc": "Low (Medium)",
+      "risk": "Low",
+      "confidence": "Medium",
+      "url": "http://shop.brakes-vapt.test:3000/profile",
+      "method": "GET",
+      "param": "token",
+      "evidence": "Set-Cookie: token",
+      "description": "Synthetic fixture alert for Cookie No HttpOnly Flag.",
+      "solution": "See the catalogue entry.",
+      "cweid": "1004",
+      "wascid": "13",
+      "messageId": "90"
+    },
+    {
+      "pluginId": "10054",
+      "alertRef": "10054-1",
+      "name": "Cookie without SameSite Attribute",
+      "riskdesc": "Low (Medium)",
+      "risk": "Low",
+      "confidence": "Medium",
+      "url": "http://shop.brakes-vapt.test:3000/profile",
+      "method": "GET",
+      "param": "token",
+      "evidence": "Set-Cookie: token",
+      "description": "Synthetic fixture alert for Cookie without SameSite Attribute.",
+      "solution": "See the catalogue entry.",
+      "cweid": "1275",
+      "wascid": "13",
+      "messageId": "90"
+    },
+    {
+      "pluginId": "10010",
+      "alertRef": "10010-1",
+      "name": "Cookie No HttpOnly Flag",
+      "riskdesc": "Low (Medium)",
+      "risk": "Low",
+      "confidence": "Medium",
+      "url": "http://shop.brakes-vapt.test:3000/login",
+      "method": "GET",
+      "param": "session",
+      "evidence": "Set-Cookie: session",
+      "description": "Synthetic fixture alert for Cookie No HttpOnly Flag.",
+      "solution": "See the catalogue entry.",
+      "cweid": "1004",
+      "wascid": "13",
+      "messageId": "91"
     }
   ],
   "messages": {
@@ -284,6 +338,18 @@
       "requestBody": "",
       "responseHeader": "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n",
       "responseBody": "User-agent: *\nDisallow: /ftp\n"
+    },
+    "90": {
+      "requestHeader": "GET /profile HTTP/1.1\r\nHost: shop.brakes-vapt.test:3000\r\nUser-Agent: ZAP\r\n\r\n",
+      "requestBody": "",
+      "responseHeader": "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nSet-Cookie: token=SYNTHETIC-FIXTURE-VALUE; Path=/\r\n\r\n",
+      "responseBody": "<!doctype html><html><body><h1>Profile</h1></body></html>"
+    },
+    "91": {
+      "requestHeader": "GET /login HTTP/1.1\r\nHost: shop.brakes-vapt.test:3000\r\nUser-Agent: ZAP\r\n\r\n",
+      "requestBody": "",
+      "responseHeader": "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nSet-Cookie: session=SYNTHETIC-FIXTURE-VALUE; Path=/; HttpOnly; SameSite=Lax\r\n\r\n",
+      "responseBody": "<!doctype html><html><body><form id=\"login\"></form></body></html>"
     }
   }
 }

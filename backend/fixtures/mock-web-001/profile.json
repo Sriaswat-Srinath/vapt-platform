@@ -1,0 +1,9 @@
+{
+  "path": "/profile?userId=42&imageUrl=http%3A%2F%2Fexample.test%2Favatar.png",
+  "status": 200,
+  "headers": {
+    "content-type": "text/html; charset=utf-8",
+    "set-cookie": "token=SYNTHETIC-FIXTURE-VALUE; Path=/"
+  },
+  "body": "<html><body><h1>Profile</h1><form method=\"post\" action=\"/profile\" enctype=\"multipart/form-data\"><input type=\"file\" name=\"avatar\"><input type=\"text\" name=\"username\"><input type=\"number\" name=\"quantity\" value=\"1\"><button>Save</button></form></body></html>"
+}

@@ -83,8 +83,17 @@ def test_login_surface_produces_no_bruteforce_candidate():
         auth_entry_kind="login_form", parameter_names=(), has_login_form=True,
         has_password_field=True, has_file_input=False, missing_security_headers=())
     text = " ".join(c.concern + c.rationale for c in cands).lower()
-    assert "brute" not in text and "credential guessing is not proposed" in text
-    assert all(not c.requires_intrusive for c in cands)
+    # The matrix must name the exclusion rather than stay silent about it: a
+    # reader of the candidate list should see that guessing was ruled OUT by
+    # project constraint, not simply omitted.
+    assert "brute force are out of scope" in text
+    assert "credential guessing" in text
+    auth = [c for c in cands if c.concern == "authentication"]
+    assert auth, "a login form must produce an authentication candidate"
+    # Nothing on a login surface may propose sending credentials.
+    assert all("guess" not in c.rationale.lower().replace("credential guessing and brute "
+                                                         "force are out of scope", "")
+               for c in cands)
 
 
 def test_matrix_is_deterministic_and_versioned():

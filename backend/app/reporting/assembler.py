@@ -11,9 +11,11 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from .. import models
+from ..api.v1.taxonomy_api import _coverage_rows
+from .. import coverage as cv
 
 TEMPLATE_KEY = "vapt-standard"
-TEMPLATE_VERSION = "1.0.0"
+TEMPLATE_VERSION = "1.1.0"
 
 # Every artifact must carry this, in every format. Invariant I10.
 SYNTHETIC_STATEMENT = (
@@ -112,8 +114,30 @@ def build(session: Session, *, asset: models.Asset, job_ids: list[str],
             "provenance": provenance,
         })
 
+    # ---- taxonomy coverage, including the zeroes ---------------------------
+    # The question a reader cannot answer from a findings list alone: what could
+    # this assessment have found? Categories with no capability are reported
+    # with their zeroes rather than omitted.
+    coverage_rows = _coverage_rows(session, asset)
+    coverage_summary = cv.summary(coverage_rows)
+    tier1 = [r for r in coverage_rows if r.tier == 1]
+    silent = [r for r in tier1 if r.detection in (cv.NONE, cv.CATALOGUED)]
+    surface_only = [r for r in tier1 if r.detection == cv.SURFACE_ONLY]
+
     # ---- limitations, derived from what actually happened -----------------
     limitations: list[str] = [SYNTHETIC_STATEMENT]
+    if silent:
+        limitations.append(
+            f"{len(silent)} of {len(tier1)} Tier-1 vulnerability categories were NOT assessable "
+            f"by this build: {', '.join(r.display_name for r in silent)}. No detection exists for "
+            "them here, so their absence from this report is not evidence of their absence in the "
+            "target.")
+    if surface_only:
+        limitations.append(
+            f"{len(surface_only)} further categor(ies) were identified on the attack surface but "
+            f"could not be confirmed: {', '.join(r.display_name for r in surface_only)}. "
+            "Confirming them requires active or intrusive testing, which is disabled and requires "
+            "two independent approvals.")
     fixture_jobs = [j for j in jobs if j.mode == "fixture"]
     live_jobs = [j for j in jobs if j.mode == "live"]
     if fixture_jobs:
@@ -249,6 +273,12 @@ def build(session: Session, *, asset: models.Asset, job_ids: list[str],
                              "remediation_md": f["remediation_md"],
                              "affected_url": f["affected_url"]}
                             for f in detailed if f["remediation_md"]]}},
+        {"key": "coverage", "heading": "Taxonomy coverage",
+         "data": {"summary": coverage_summary,
+                  "categories": [r.as_dict() for r in coverage_rows],
+                  "method": ("Coverage is counted, not estimated: catalogue entries, rule packs "
+                             "that can reach a verdict, flagged surfaces and stored findings, per "
+                             "category. A category with no capability is listed with its zeroes.")}},
         {"key": "limitations", "heading": "Limitations of this assessment",
          "data": {"items": limitations}},
     ]

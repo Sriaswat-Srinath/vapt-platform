@@ -265,7 +265,9 @@ def test_candidate_tests_are_deterministic_and_flag_intrusive(asset_id):
     assert status == 200 and body["candidates"], body
     assert body["matrix_version"]
     concerns = {c["concern"] for c in body["candidates"]}
-    assert {"injection", "authentication_weaknesses", "security_misconfiguration"} <= concerns
+    # Concerns are taxonomy keys (taxonomy 1.0.0): discovery and findings share
+    # one vocabulary, so a flagged surface counts toward its category.
+    assert {"injection", "authentication", "security_misconfiguration"} <= concerns
     injection = [c for c in body["candidates"] if c["concern"] == "injection"]
     assert injection and all(c["requires_intrusive"] for c in injection)
     assert "never findings" in body["note"]

@@ -8,6 +8,8 @@ import Assets from "./pages/Assets";
 import Scope from "./pages/Scope";
 import Assessments from "./pages/Assessments";
 import Findings from "./pages/Findings";
+import Coverage from "./pages/Coverage";
+import Analyst from "./pages/Analyst";
 import Reports from "./pages/Reports";
 
 const NAV = [
@@ -16,6 +18,8 @@ const NAV = [
   { to: "/scope", label: "Scope" },
   { to: "/assessments", label: "Assessments" },
   { to: "/findings", label: "Findings" },
+  { to: "/coverage", label: "Coverage" },
+  { to: "/analyst", label: "AI analyst" },
   { to: "/reports", label: "Reports" },
 ];
 
@@ -74,6 +78,8 @@ export default function App() {
           <Route path="/assessments" element={<Assessments />} />
           <Route path="/findings" element={<Findings />} />
           <Route path="/findings/:findingId" element={<Findings />} />
+          <Route path="/coverage" element={<Coverage />} />
+          <Route path="/analyst" element={<Analyst />} />
           <Route path="/reports" element={<Reports />} />
         </Routes>
         </Boundary>

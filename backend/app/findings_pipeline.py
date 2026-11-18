@@ -11,8 +11,10 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from . import audit, models
+from .discovery import extractors
 from .evidence import redaction, store
 from .normalization import mapper, zap_mapping
+from .normalization import zap_mapping as zm
 from .validation import engine as ve
 from .risk import cvss
 
@@ -64,7 +66,8 @@ def _store_evidence(session: Session, finding: models.Finding, *, kind: str, lab
 def _validation_inputs(*, nf: mapper.NormalizedFinding, coverage_complete: bool,
                        req_headers: dict[str, str], req_body: str,
                        resp_headers: dict[str, str], resp_body: str,
-                       has_request: bool, has_response: bool) -> ve.ValidationInputs:
+                       has_request: bool, has_response: bool,
+                       transport_is_cleartext: bool = False) -> ve.ValidationInputs:
     header = SECURITY_HEADER_FOR_KEY.get(nf.catalogue_key or "")
     present = absent = 0
     if header and has_response:
@@ -80,6 +83,12 @@ def _validation_inputs(*, nf: mapper.NormalizedFinding, coverage_complete: bool,
     unencoded = bool(evidence) and found and not any(
         tok in resp_body for tok in (f"&lt;{evidence}", f"&amp;{evidence}")) and (
         "<" in (evidence or "") or html)
+    # Cookie facts for the session-management pack. The Set-Cookie VALUE is
+    # never read: only whether a cookie was set and which attribute names it
+    # carries.
+    set_cookie = resp_headers.get("set-cookie") if has_response else None
+    cookie_attrs = extractors.cookie_attributes(set_cookie)
+    claimed = zm.cookie_attribute_claim(nf.adapter_rule_id)
     return ve.ValidationInputs(
         evidence_class=nf.evidence_class, coverage_complete=coverage_complete,
         status_codes=(status,) if status else (),
@@ -90,7 +99,11 @@ def _validation_inputs(*, nf: mapper.NormalizedFinding, coverage_complete: bool,
         scanner_evidence=evidence, evidence_found_in_body=found,
         reflected_unencoded=unencoded, html_context=html,
         has_request_evidence=has_request, has_response_evidence=has_response,
-        confidence=nf.confidence)
+        confidence=nf.confidence,
+        set_cookie_count=1 if set_cookie else 0,
+        cookie_attributes_present=cookie_attrs,
+        cookie_attribute_claimed_missing=claimed,
+        transport_is_cleartext=transport_is_cleartext)
 
 
 def _attach_cvss(session: Session, finding: models.Finding) -> models.RiskScore | None:
@@ -193,7 +206,8 @@ def process_job(session: Session, job: models.ScanJob, asset: models.Asset) -> d
             nf=nf, coverage_complete=bool(job.coverage_complete),
             req_headers=req_headers, req_body=req_body,
             resp_headers=resp_headers, resp_body=resp_body,
-            has_request=bool(req_text), has_response=bool(resp_text)))
+            has_request=bool(req_text), has_response=bool(resp_text),
+            transport_is_cleartext=(asset.protocol or "http").lower() == "http"))
         evidence_ids = [str(e.id) for e in session.execute(select(models.Evidence).where(
             models.Evidence.finding_id == finding.id)).scalars().all()]
         if finding.validation_state != outcome.state or finding.validation_rule_id != outcome.rule_id:

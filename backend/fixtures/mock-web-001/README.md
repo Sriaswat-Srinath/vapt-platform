@@ -10,3 +10,11 @@ network at all. `source=fixture` discovery runs read these; `source=live` runs
 require the full gate chain, including a signed authorisation.
 
 Each `*.json` is one recorded-shaped response: `path`, `status`, `headers`, `body`.
+
+`redirect.json` and `profile.json` were added with the taxonomy work so the
+matrix can be exercised across all twelve Tier-1 concerns: they carry a
+URL-valued parameter (SSRF surface), an object reference and a commercial
+quantity (access control, business logic), a file input (file upload), and a
+`Set-Cookie` with no `HttpOnly`/`SameSite` (session management). The cookie
+value is the literal string `SYNTHETIC-FIXTURE-VALUE` — nothing here was
+observed from a real application.

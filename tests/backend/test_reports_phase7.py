@@ -70,22 +70,23 @@ def report(asset_id) -> dict:
 
 
 # ------------------------------------------------------------- template ------
-def test_template_is_declared_with_a_version_and_nine_sections():
+def test_template_is_declared_with_a_version_and_every_section():
     status, body = call("GET", "/report-templates")
     assert status == 200, body
     t = body[0]
     assert t["key"] == assembler.TEMPLATE_KEY
     assert re.fullmatch(r"\d+\.\d+\.\d+", t["version"])
-    assert len(t["sections"]) == 9
+    assert t["sections"] == ["executive_summary", "scope", "methodology", "attack_surface",
+                             "vulnerability_summary", "findings", "risk_prioritisation",
+                             "remediation", "coverage", "limitations"]
 
 
 def test_report_records_the_template_it_was_built_from(report):
     assert report["template_key"] == assembler.TEMPLATE_KEY
     assert report["template_version"] == assembler.TEMPLATE_VERSION
-    assert [s["key"] for s in report["sections"]] == [
-        "executive_summary", "scope", "methodology", "attack_surface",
-        "vulnerability_summary", "findings", "risk_prioritisation",
-        "remediation", "limitations"]
+    _, template = call("GET", "/report-templates")
+    assert [s["key"] for s in report["sections"]] == template[0]["sections"], \
+        "the template's declared sections and the report's actual sections must agree"
 
 
 # ------------------------------------------- I10 (every artifact format) ------

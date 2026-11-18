@@ -540,6 +540,29 @@ class IngestionRejection(Base):
 
 
 # ------------------------------------------------ catalogue / findings --------
+class VulnTaxonomy(Base):
+    """The vulnerability taxonomy as data (app/taxonomy.py is the source).
+
+    Seeded, never written by an LLM. Every category has a row whether or not
+    this build can detect it, so a coverage query returns the ZEROES too — the
+    gaps are measurable instead of implied.
+    """
+    __tablename__ = "vuln_taxonomy"
+    id: Mapped[Any] = _pk()
+    key: Mapped[str] = mapped_column(String(60), unique=True, nullable=False)
+    display_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    tier: Mapped[int] = mapped_column(Integer, nullable=False)
+    priority: Mapped[str] = mapped_column(String(16), nullable=False)
+    # What evidence the category needs IN PRINCIPLE: passive | active | manual.
+    # Independent of whether this build has the rule yet.
+    assertability: Mapped[str] = mapped_column(String(16), nullable=False)
+    owasp_2021: Mapped[str | None] = mapped_column(String(8))
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    sort_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    taxonomy_version: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_at: Mapped[dt.datetime] = _now()
+
+
 class VulnCatalogue(Base):
     """Curated vulnerability classes. The ONLY default source of CVSS.
 
@@ -551,6 +574,9 @@ class VulnCatalogue(Base):
     id: Mapped[Any] = _pk()
     key: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
+    # `category` is the taxonomy key. It stays a plain string rather than a FK
+    # constraint so a catalogue entry can never be deleted by a taxonomy edit,
+    # but `GET /taxonomy/coverage` reports any entry that does not resolve.
     category: Mapped[str] = mapped_column(String(60), nullable=False)
     cwe_ids: Mapped[list[str] | None] = mapped_column(ARRAY(String))
     default_severity: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -727,6 +753,54 @@ class RiskScore(Base):
 
 
 # --------------------------------------------------------------- reporting ----
+class AgentRun(Base):
+    """One bounded agent pass (L3, advisory).
+
+    Recorded whatever the outcome, including `disabled` and `refused`: a run
+    that never left the building is exactly the one worth being able to prove.
+    """
+    __tablename__ = "agent_runs"
+    id: Mapped[Any] = _pk()
+    asset_id: Mapped[Any] = mapped_column(UUID(as_uuid=True), ForeignKey("assets.id"), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    runner_version: Mapped[str] = mapped_column(String(20), nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(20), nullable=False)
+    tool_catalogue_version: Mapped[str] = mapped_column(String(20), nullable=False)
+    # Null when the payload never passed the stage-2 boundary.
+    boundary_version: Mapped[str | None] = mapped_column(String(20))
+    boundary_report: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    model: Mapped[str | None] = mapped_column(String(80))
+    provider_host: Mapped[str | None] = mapped_column(String(120))
+    bytes_sent: Mapped[int | None] = mapped_column(Integer)
+    bytes_received: Mapped[int | None] = mapped_column(Integer)
+    elapsed_ms: Mapped[int | None] = mapped_column(Integer)
+    # Model outputs the platform REFUSED to store as proposals. Kept, because a
+    # silent drop would hide the behaviour most worth watching.
+    rejected: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
+    error: Mapped[str | None] = mapped_column(Text)
+    requested_by: Mapped[str | None] = mapped_column(String(64))
+    started_at: Mapped[dt.datetime] = _now()
+    finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AgentProposal(Base):
+    """An advisory proposal. Accepting one records a human's agreement and
+    changes NO platform state: validation, severity, CVSS, scope and execution
+    all remain L2 decisions (CLAUDE.md rule 13)."""
+    __tablename__ = "agent_proposals"
+    id: Mapped[Any] = _pk()
+    run_id: Mapped[Any] = mapped_column(UUID(as_uuid=True), ForeignKey("agent_runs.id"), nullable=False)
+    asset_id: Mapped[Any] = mapped_column(UUID(as_uuid=True), ForeignKey("assets.id"), nullable=False)
+    tool: Mapped[str] = mapped_column(String(60), nullable=False)
+    arguments: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    citations: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="proposed")
+    reviewed_by: Mapped[str | None] = mapped_column(String(64))
+    reviewed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    review_note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[dt.datetime] = _now()
+
+
 class Report(Base):
     __tablename__ = "reports"
     id: Mapped[Any] = _pk()

@@ -5,6 +5,7 @@ re-normalised with an improved mapper and the delta is auditable (ADR-0002).
 """
 from __future__ import annotations
 import dataclasses as dc
+from ..catalogue import CATALOGUE
 from . import fingerprint as fp
 from . import zap_mapping as zm
 
@@ -28,6 +29,12 @@ class NormalizedFinding:
     fingerprint: str
 
 
+# Catalogue key -> taxonomy category. The catalogue module is dependency-free
+# precisely so this import cannot fail: normalisation and the database must not
+# be able to disagree about which category an entry belongs to.
+CATALOGUE_CATEGORY: dict[str, str] = {c["key"]: c["category"] for c in CATALOGUE}
+
+
 def normalize_zap_alert(*, asset_id: str, payload: dict, adapter_rule_id: str | None,
                         observed_url: str | None, detection_source: str = "zap_passive"
                         ) -> NormalizedFinding | None:
@@ -39,11 +46,16 @@ def normalize_zap_alert(*, asset_id: str, payload: dict, adapter_rule_id: str | 
     method = (payload.get("method") or "GET").upper()
     param = payload.get("param") or None
     title = payload.get("name") or (catalogue_key or f"ZAP rule {adapter_rule_id}")
-    category = {
+    # The CATALOGUE is the authority on category: it carries the curated
+    # taxonomy key. Evidence class is only the fallback for a detection that no
+    # catalogue entry covers, and that fallback must never invent a category it
+    # cannot justify.
+    category = CATALOGUE_CATEGORY.get(catalogue_key or "") or {
         "missing_header": "security_misconfiguration",
         "header_value": "security_misconfiguration",
         "pattern_in_body": "information_disclosure",
         "reflected_input": "injection",
+        "cookie_attribute": "session_management",
         "missing_form_token": "broken_access_control",
         "unmapped": "unmapped_detection",
     }.get(evidence_class, "unmapped_detection")

@@ -78,6 +78,49 @@ export interface Capabilities {
   llm_enabled: boolean; evidence_encryption: string; environment_policy: string;
   policy_version: string;
 }
+export interface CategoryCoverage {
+  key: string; display_name: string; tier: number; priority: string;
+  assertability: string; owasp_2021: string | null; description: string;
+  catalogue_entries: number; decidable_entries: number; candidates: number;
+  findings_total: number; findings_by_state: Record<string, number>;
+  detection: string; blocked_by: string[]; note: string;
+}
+export interface Coverage {
+  asset_id: string; asset_identifier: string;
+  summary: {
+    taxonomy_version: string; matrix_version: string; rules_version: string;
+    tier1_total: number; tier1_detecting: number; tier1_partial: number;
+    tier1_surface_only: number; tier1_catalogued_only: number;
+    tier1_no_capability: number; tier1_with_findings: number;
+    categories_this_build_cannot_report: string[]; uncategorised_findings: number;
+    note: string;
+  };
+  categories: CategoryCoverage[];
+}
+
+export interface AgentProposal {
+  id: string; run_id: string; tool: string; arguments: Record<string, unknown>;
+  citations: string[]; state: string; reviewed_by: string | null;
+  reviewed_at: string | null; review_note: string | null; created_at: string;
+  advisory: boolean;
+}
+export interface AgentRun {
+  id: string; asset_id: string; state: string; model: string | null;
+  provider_host: string | null; runner_version: string; prompt_version: string;
+  tool_catalogue_version: string; boundary_version: string | null;
+  boundary_report: { checked_fields: number; re_redacted_fields: number; keyed_refs: number } | null;
+  bytes_sent: number | null; bytes_received: number | null; elapsed_ms: number | null;
+  error: string | null; rejected: { reason: string; detail: string; tool?: string }[];
+  started_at: string; finished_at: string | null; proposals: AgentProposal[];
+}
+export interface AgentCapabilities {
+  llm_enabled: boolean; model: string | null; provider_host: string | null;
+  egress: string; runner_version: string; prompt_version: string;
+  tool_catalogue_version: string; boundary_version: string;
+  tools: { tool: string; summary: string; fields: string[]; requires_citations: boolean }[];
+  cannot: [string, string][]; note: string;
+}
+
 export interface Report {
   id: string; title: string; state: string; generated_at: string | null;
   template_key: string; template_version: string; filter: { include_states?: string[] } | null;
@@ -152,6 +195,7 @@ export const api = {
       `/assets/${assetId}/discovery-runs`),
   attackSurface: (assetId: string) => call<AttackSurface>(`/assets/${assetId}/attack-surface`),
   candidateTests: (assetId: string) => call<CandidateTests>(`/assets/${assetId}/candidate-tests`),
+  coverage: (assetId: string) => call<Coverage>(`/assets/${assetId}/coverage`),
   findings: (assetId: string) => call<Finding[]>(`/findings?asset_id=${assetId}&limit=200`),
   finding: (id: string) => call<FindingDetail>(`/findings/${id}`),
   findingsSummary: (assetId: string) =>
@@ -162,6 +206,13 @@ export const api = {
       `/evidence/${id}/content`),
   reportTemplates: () =>
     call<{ key: string; version: string; sections: string[] }[]>("/report-templates"),
+  agentCapabilities: () => call<AgentCapabilities>("/agent/capabilities"),
+  agentRuns: (assetId: string) => call<AgentRun[]>(`/assets/${assetId}/agent/runs`),
+  startAgentRun: (assetId: string) =>
+    call<AgentRun>(`/assets/${assetId}/agent/runs`, { method: "POST" }),
+  reviewProposal: (id: string, decision: "accepted" | "rejected", note?: string) =>
+    call<AgentProposal>(`/agent/proposals/${id}/review?decision=${decision}`,
+      { method: "POST", body: JSON.stringify({ note: note ?? null }) }),
   reports: (assetId?: string) => call<Report[]>(`/reports${assetId ? `?asset_id=${assetId}` : ""}`),
   report: (id: string) => call<ReportDetail>(`/reports/${id}`),
   generateReport: (assetId: string, includeStates: string[]) =>

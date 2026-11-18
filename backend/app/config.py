@@ -43,7 +43,18 @@ class Settings(BaseSettings):
     suppress_negative_evidence_on_partial_coverage: bool = True
 
     lab_subnet: str = "172.30.10.0/24"
+
+    # ---- the agent (L3, advisory only) -------------------------------------
+    # Disabled by default. Enabling it grants the agent nothing but the ability
+    # to be ASKED: it proposes from a fixed catalogue and sets no state.
     llm_enabled: bool = False
+    llm_provider_host: str = "llm-standin"          # test stand-in by default
+    llm_provider_port: int = 8443
+    llm_path: str = "/v1/messages"
+    llm_model: str = "stand-in"
+    llm_proxy_url: str = "http://172.30.22.60:3128"  # the ONLY route out
+    llm_max_findings: int = 25
+    llm_timeout_seconds: int = 30
 
     @field_validator("default_scanner_adapter")
     @classmethod

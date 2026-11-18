@@ -156,7 +156,15 @@ services:
       DUAL_CONTROL_AVAILABLE: ${DUAL_CONTROL_AVAILABLE:-false}
       DEFAULT_SCANNER_ADAPTER: ${DEFAULT_SCANNER_ADAPTER:-mock}
       LAB_SUBNET: ${LAB_SUBNET:-172.30.10.0/24}
-      LLM_ENABLED: "false"
+      # The advisory agent (L3). OFF by default; `make test-agent` turns it on
+      # for one run against the LOCAL stand-in and turns it back off. Enabling
+      # it grants no execution capability: the agent proposes, a human decides,
+      # and the gate chain is untouched.
+      LLM_ENABLED: ${LLM_ENABLED:-false}
+      LLM_PROVIDER_HOST: ${LLM_PROVIDER_HOST:-llm-standin}
+      LLM_PROVIDER_PORT: ${LLM_PROVIDER_PORT:-8443}
+      LLM_MODEL: ${LLM_MODEL:-stand-in}
+      LLM_PROXY_URL: ${LLM_PROXY_URL:-http://172.30.22.60:3128}
       # No egress of its own: outbound exists only via the proxy (phase 5).
       HTTPS_PROXY: "http://172.30.22.60:3128"
       HTTP_PROXY: "http://172.30.22.60:3128"
@@ -228,6 +236,8 @@ services:
       DUAL_CONTROL_AVAILABLE: ${DUAL_CONTROL_AVAILABLE:-false}
       DEFAULT_SCANNER_ADAPTER: ${DEFAULT_SCANNER_ADAPTER:-mock}
       LAB_SUBNET: ${LAB_SUBNET:-172.30.10.0/24}
+      # Hard false, not configurable: the worker is on no egress network and
+      # never calls the agent. NET-C fails the whole check if this is true.
       LLM_ENABLED: "false"
       ZAP_BASE_URL: ${ZAP_BASE_URL:-http://172.30.10.10:8080}
       ZAP_API_KEY: ${ZAP_API_KEY:-}

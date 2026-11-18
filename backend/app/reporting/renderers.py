@@ -10,7 +10,7 @@ import html
 import json
 from typing import Any
 
-RENDERER_VERSION = "1.0.0"
+RENDERER_VERSION = "1.1.0"
 
 
 def _esc(v: Any) -> str:
@@ -253,6 +253,33 @@ def render_html(*, asset: dict, sections: list[dict], meta: dict) -> bytes:
         a("</table>")
     else:
         a("<p>No remediation text is available for the reported findings.</p>")
+
+    # ---- taxonomy coverage (the zeroes are the point of this section)
+    cov = by_key.get("coverage", {}).get("data")
+    if cov:
+        cs = cov["summary"]
+        a("<h2>Taxonomy coverage</h2>")
+        a(f"<p>Of {_esc(cs['tier1_total'])} Tier-1 categories, this assessment could reach a "
+          f"deterministic verdict in <strong>{_esc(cs['tier1_detecting'])}</strong>, had partial "
+          f"capability in {_esc(cs.get('tier1_partial', 0))}, identified surface without "
+          f"confirmation in {_esc(cs['tier1_surface_only'])}, and had "
+          f"<strong>no detection capability</strong> in "
+          f"{_esc(cs['tier1_catalogued_only'] + cs['tier1_no_capability'])}.</p>")
+        a(f"<p class=\"sub\">{_esc(cov['method'])}</p>")
+        a("<table><tr><th>Category</th><th>Tier</th><th>Priority</th>"
+          "<th class=\"num\">Catalogue</th><th class=\"num\">Surfaces</th>"
+          "<th class=\"num\">Findings</th><th>This build</th></tr>")
+        for r in cov["categories"]:
+            if r["tier"] != 1:
+                continue
+            a(f"<tr><td>{_esc(r['display_name'])}</td><td>{_esc(r['tier'])}</td>"
+              f"<td>{_esc(r['priority'])}</td>"
+              f"<td class=\"num\">{_esc(r['catalogue_entries'])}</td>"
+              f"<td class=\"num\">{_esc(r['candidates'])}</td>"
+              f"<td class=\"num\">{_esc(r['findings_total'])}</td>"
+              f"<td>{_esc(r['detection'].replace('_', ' '))}</td></tr>")
+        a("</table>")
+        a(f"<p class=\"sub\">{_esc(cs['note'])}</p>")
 
     # ---- limitations
     a("<h2>Limitations of this assessment</h2><ul>")

@@ -1,5 +1,13 @@
 # AI Investigation Agent (LangGraph)
 
+> **Implementation note (phase 6, 2026-11-18).** What was BUILT is a bounded single pass in
+> `backend/app/agent/` — `boundary.py`, `tools.py`, `parsing.py`, `client.py`, `runner.py` — not a
+> LangGraph graph. The agent has no executable tools, so iteration buys nothing a second analyst
+> request would not; the module boundary is kept so a graph can replace `runner.run()` without
+> touching the safety surfaces. Everything below about authority, redaction and citation holds and
+> is enforced in code. See [ADR-0014](adr/ADR-0014-agent-proposes-only.md) and
+> [MVP_TAXONOMY_AGENT_REPORT.md](MVP_TAXONOMY_AGENT_REPORT.md) for what exists today.
+
 One bounded graph, `agent/graph.py`, version-pinned as `graph_version` on every run. The agent is a
 **reader and explainer**. It has no authority over security boundaries or finding status.
 
