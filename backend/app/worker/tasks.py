@@ -255,7 +255,7 @@ def run_assessment(self, job_id: str) -> dict[str, Any]:  # noqa: ANN001
     and holds the global daemon lease across the entire session (ADR-0008 R2)."""
     from ..scanners import base as sb
     from ..scanners.registry import get_adapter
-    from .daemon_lease import DaemonDirty, ExclusiveDaemonLease, LeaseUnavailable, mark_dirty
+    from .daemon_lease import DaemonDirty, ExclusiveDaemonLease, LeaseUnavailable
 
     session = session_factory()()
     lease: ExclusiveDaemonLease | None = None
@@ -287,11 +287,15 @@ def run_assessment(self, job_id: str) -> dict[str, Any]:  # noqa: ANN001
                      detail={"first_failure": (result.first_failure.gate
                                                if result.first_failure else None)})
         if not result.allowed:
-            _job_event(session, job, "blocked", "preflight",
-                       f"gate {result.first_failure.gate}: {result.first_failure.reason}")
+            # `first_failure` is always set when a decision denies, but say so
+            # explicitly rather than relying on it two lines later.
+            failure = result.first_failure
+            gate_name = failure.gate if failure else "unknown"
+            reason = failure.reason if failure else "no failing gate was recorded"
+            _job_event(session, job, "blocked", "preflight", f"gate {gate_name}: {reason}")
             job.stop_reason, job.finished_at = "scope_denied", dt.datetime.now(dt.timezone.utc)
             session.commit()
-            return {"state": "blocked", "gate": result.first_failure.gate}
+            return {"state": "blocked", "gate": gate_name}
         job.pinned_ips = list(result.resolved_ips)
 
         adapter_name = job.adapter_name or settings().default_scanner_adapter
@@ -489,7 +493,7 @@ def scanner_reset(self, reset_id: str, adapter: str) -> dict[str, Any]:  # noqa:
     session = session_factory()()
     steps: list[dict[str, Any]] = []
     failing: str | None = None
-    client = None
+    client: "ZapClient | None" = None
     try:
         row = session.get(models.ScannerReset, reset_id)
         st = daemon_state(session, adapter)
@@ -508,7 +512,7 @@ def scanner_reset(self, reset_id: str, adapter: str) -> dict[str, Any]:  # noqa:
             except ZapApiError as exc:
                 steps.append({"step": "R2", "pass": False, "detail": f"unreachable: {exc}"})
                 failing = "R2"
-        if failing is None:
+        if failing is None and client is not None:
             try:
                 client.new_session(f"reset-{int(time.time())}")
                 steps.append({"step": "R4", "pass": True, "detail": "newSession"})
@@ -518,7 +522,7 @@ def scanner_reset(self, reset_id: str, adapter: str) -> dict[str, Any]:  # noqa:
             except ZapApiError as exc:
                 steps.append({"step": "R4", "pass": False, "detail": str(exc)})
                 failing = "R4"
-        if failing is None:
+        if failing is None and client is not None:
             try:
                 probe = f"vapt-probe-{int(time.time())}"
                 client.new_context(probe)
@@ -529,7 +533,7 @@ def scanner_reset(self, reset_id: str, adapter: str) -> dict[str, Any]:  # noqa:
             except ZapApiError as exc:
                 steps.append({"step": "R6", "pass": False, "detail": str(exc)})
                 failing = "R6"
-        if failing is None:
+        if failing is None and client is not None:
             try:
                 marker = f"vapt-instance-{int(time.time())}"
                 client.new_context(marker)
@@ -559,4 +563,30 @@ def scanner_reset(self, reset_id: str, adapter: str) -> dict[str, Any]:  # noqa:
     finally:
         if client is not None:
             client.close()
+        session.close()
+
+
+@celery.task(name="vapt.retention_purge", bind=True)
+def retention_purge(self, dry_run: bool = True) -> dict[str, Any]:  # noqa: ANN001
+    """Scheduled retention purge.
+
+    Registered on the beat schedule only when RETENTION_ENABLED is true, and it
+    checks the flag again here: a task that was queued while retention was
+    enabled must not delete anything after it has been turned off.
+    """
+    from .. import retention
+    session = session_factory()()
+    started = dt.datetime.now(dt.timezone.utc)
+    try:
+        if not settings().retention_enabled:
+            return {"state": "disabled", "purged": 0,
+                    "note": "RETENTION_ENABLED is false; nothing was examined"}
+        outcome = retention.run(session, dry_run=dry_run)
+        row = retention.record(session, outcome, triggered_by="scheduler", started_at=started)
+        audit.record(session, action="retention_purge", actor_kind="system",
+                     actor_id="scheduler", outcome=outcome.state, subject_type="purge_run",
+                     subject_id=str(row.id), detail=outcome.as_dict())
+        session.commit()
+        return {"id": str(row.id), **outcome.as_dict()}
+    finally:
         session.close()

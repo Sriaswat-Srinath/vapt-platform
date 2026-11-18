@@ -70,8 +70,9 @@ class ExclusiveDaemonLease:
         self.dirty_on_entry = False
 
     def __enter__(self) -> "ExclusiveDaemonLease":
-        self._conn = self._engine.connect()
-        got = bool(self._conn.execute(text(LOCK_KEY_SQL), {"key": self.key}).scalar())
+        conn = self._engine.connect()
+        self._conn = conn
+        got = bool(conn.execute(text(LOCK_KEY_SQL), {"key": self.key}).scalar())
         self._session = sessionmaker(bind=self._engine, expire_on_commit=False, future=True)()
         if not got:
             self._cleanup()

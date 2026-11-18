@@ -21,6 +21,7 @@ A refusal here is a FAILURE of the caller, never a reason to send anyway.
 from __future__ import annotations
 import dataclasses as dc
 import re
+from collections.abc import Iterator
 
 from ..evidence import redaction
 
@@ -79,7 +80,8 @@ STRUCTURAL_KEYS = frozenset({
 })
 
 
-def _walk(node: object, path: str = "$", key: str | None = None):
+def _walk(node: object, path: str = "$",
+          key: str | None = None) -> Iterator[tuple[str, str | None, object]]:
     if isinstance(node, dict):
         for k, v in node.items():
             yield from _walk(v, f"{path}.{k}", k)

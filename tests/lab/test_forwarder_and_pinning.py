@@ -2,7 +2,7 @@
 cases: the forwarder must refuse any destination other than the registered
 target, and must not act as a proxy to anywhere else."""
 from __future__ import annotations
-import http.client, json, os, pathlib, re, socket, subprocess, pytest
+import http.client, json, os, pathlib, re, subprocess, pytest
 
 REPO = pathlib.Path(__file__).parents[2]
 FWD = REPO / "scripts" / "lab_publish.py"

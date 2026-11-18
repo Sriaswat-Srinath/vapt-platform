@@ -7,7 +7,7 @@ import socket
 from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
-from . import audit, enums, errors, models
+from . import audit, errors, models
 from .config import settings
 from .safety import scope_policy as sp
 
@@ -102,7 +102,8 @@ def build_scope_request(session: Session, *, asset: models.Asset | None, profile
                 requester_identity_ok=identity_ok(session, appr.requested_by),
                 decider_identity_ok=identity_ok(session, appr.decided_by) if appr.decided_by else False)
 
-    resolved, resolution_error = ((), None)
+    resolved: tuple[str, ...] = ()
+    resolution_error: str | None = None
     if asset is not None:
         resolved, resolution_error = resolve_host(asset.hostname)
 
@@ -141,6 +142,8 @@ def build_scope_request(session: Session, *, asset: models.Asset | None, profile
         attested_distinct_active_identities=attested_identity_count(session),
         dual_control_min_identities=s.dual_control_min_identities,
         isolation_passed=(iso.isolation_passed if iso else None),
+        host_hygiene_passed=(iso.host_hygiene_passed if iso else None),
+        host_wildcard_listeners=(iso.host_wildcard_listeners if iso else None),
         isolation_valid_until=(iso.valid_until if iso else None),
         asset_exists=asset is not None,
         asset_state=asset.state if asset else None,
@@ -238,8 +241,10 @@ def create_job(session: Session, *, asset: models.Asset, profile_key: str, actor
         method="GET", actor_id=actor_id, mode=mode)
     if not result.allowed:
         session.commit()
+        failure = result.first_failure
         raise errors.conflict("scope-denied", "Assessment request denied by scope policy",
-                              f"Gate {result.first_failure.gate!r} failed",
+                              f"Gate {failure.gate!r} failed" if failure
+                              else "a gate denied the request",
                               {"scope_decision": result.as_dict()})
     profile = profile_row
     grant = active_grant(session, asset.id)

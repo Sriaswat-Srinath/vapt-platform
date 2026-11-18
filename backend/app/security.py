@@ -5,7 +5,6 @@ import secrets
 import uuid
 from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError, VerifyMismatchError
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 from . import models
 

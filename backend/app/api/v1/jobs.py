@@ -1,7 +1,7 @@
 """Assessment job management. A job exists only after an allow ScopeDecision."""
 from __future__ import annotations
 from fastapi import APIRouter, Depends, Header, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 import datetime as dt
 from ... import audit, errors, models, schemas, services
@@ -133,6 +133,23 @@ def revalidate(job_id: str, session: Session = Depends(get_session),
     if job is None:
         raise errors.not_found("Assessment")
     asset = session.get(models.Asset, job.asset_id)
+    # Revalidation re-reads the stored bytes. If retention has purged any of
+    # them, the inputs are no longer the inputs the original verdict was based
+    # on, and re-running would quietly produce a DIFFERENT verdict from LESS
+    # evidence. Refuse instead.
+    purged = session.execute(select(func.count()).select_from(models.RawObservation)
+                             .join(models.EvidenceBlob,
+                                   (models.EvidenceBlob.id == models.RawObservation.request_blob_id) |
+                                   (models.EvidenceBlob.id == models.RawObservation.response_blob_id))
+                             .where(models.RawObservation.job_id == job.id,
+                                    models.EvidenceBlob.state != "present")).scalar_one()
+    if purged:
+        raise errors.conflict(
+            "evidence-purged",
+            "This assessment's evidence has been purged",
+            f"{purged} stored request/response blob(s) are no longer present, so revalidation "
+            "would reach a verdict from less evidence than the original. The existing findings "
+            "and their provenance digests remain.")
     from ...findings_pipeline import process_job
     stats = process_job(session, job, asset)
     audit.record(session, action="assessment_revalidated", actor_kind="human", actor_id=p.id,

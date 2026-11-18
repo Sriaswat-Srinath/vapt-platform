@@ -182,7 +182,7 @@ def build(session: Session, *, asset: models.Asset, job_ids: list[str],
         "Evidence is not encrypted at application level; host full-disk encryption is assumed and "
         "is not verified by this platform.")
 
-    sections = [
+    sections: list[dict[str, Any]] = [
         {"key": "executive_summary", "heading": "Executive summary",
          "body_md": None,
          "data": {"asset_identifier": asset.asset_identifier, "hostname": asset.hostname,
@@ -216,10 +216,12 @@ def build(session: Session, *, asset: models.Asset, job_ids: list[str],
                                    "observations": j.observations_count,
                                    "requests_made": j.requests_made,
                                    "budgets": j.budget_snapshot,
-                                   "excluded_paths": (profiles.get(j.profile_key).excluded_path_patterns
-                                                      if profiles.get(j.profile_key) else None),
-                                   "method_denylist": (profiles.get(j.profile_key).method_denylist
-                                                       if profiles.get(j.profile_key) else None)}
+                                   "excluded_paths": (prof.excluded_path_patterns
+                                                      if (prof := profiles.get(j.profile_key))
+                                                      else None),
+                                   "method_denylist": (prof2.method_denylist
+                                                       if (prof2 := profiles.get(j.profile_key))
+                                                       else None)}
                                   for j in jobs],
                   "isolation_check": ({"checked_at": iso.checked_at.isoformat(),
                                        "isolation_passed": iso.isolation_passed,
@@ -282,7 +284,7 @@ def build(session: Session, *, asset: models.Asset, job_ids: list[str],
         {"key": "limitations", "heading": "Limitations of this assessment",
          "data": {"items": limitations}},
     ]
-    for i, s in enumerate(sections):
-        s["seq"] = i
-        s.setdefault("body_md", None)
+    for i, section in enumerate(sections):
+        section["seq"] = i
+        section.setdefault("body_md", None)
     return sections

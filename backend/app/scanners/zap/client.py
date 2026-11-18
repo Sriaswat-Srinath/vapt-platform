@@ -5,6 +5,7 @@ key is always sent, and `trust_env=False` so target/control traffic never
 consults a proxy variable.
 """
 from __future__ import annotations
+from typing import Any
 import os
 import httpx
 
@@ -57,7 +58,7 @@ class ZapClient:
         self.call("/JSON/core/action/newSession/", name=name, overwrite="true")
 
     def alerts(self, baseurl: str | None = None, start: int = 0, count: int = 100) -> list[dict]:
-        params = {"start": start, "count": count}
+        params: dict[str, Any] = {"start": start, "count": count}
         if baseurl:
             params["baseurl"] = baseurl
         return list(self.call("/JSON/alert/view/alerts/", **params).get("alerts", []))

@@ -12,7 +12,7 @@ plus source enforcement and the internal-address check, each proven against a
 running proxy rather than by reading the source.
 """
 from __future__ import annotations
-import importlib.util, json, os, pathlib, socket, subprocess, time
+import importlib.util, json, os, pathlib, subprocess, time
 import pytest
 
 REPO = pathlib.Path(__file__).parents[2]

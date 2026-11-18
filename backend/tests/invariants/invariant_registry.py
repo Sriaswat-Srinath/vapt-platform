@@ -16,6 +16,11 @@ REPO = HERE.parents[2]
 #   M1 lab · M1.5 network · P1 datastores · P2 backend+gates · P3 discovery ·
 #   P4 scanner adapters · P5 findings+validation · P6 agent · P7 dashboard+reports ·
 #   P8 hardening. MILESTONE_STATE.json records which have been delivered.
+# NOTE on I12: its two destructive cases (purge deletes, purge halts) need
+# RETENTION_ENABLED=true and run under `make test-retention`, which turns the
+# flag on for the run and off again. Without it they SKIP with that instruction
+# rather than passing vacuously. The third case — the database refusing an
+# orphan reference outright — runs always.
 INVARIANTS: dict[str, tuple[str, str, str | None]] = {
     "I1":  ("No unregistered asset can be scanned",                      "P2",  "../../../tests/backend/test_backend_core.py"),
     "I2":  ("No scan starts without a valid ScopeDecision",              "P2",  "../../../tests/backend/test_backend_core.py"),
@@ -28,7 +33,7 @@ INVARIANTS: dict[str, tuple[str, str, str | None]] = {
     "I9":  ("No unsigned authorisation document activates a scope grant","P2",  "../../../tests/backend/test_backend_core.py"),
     "I10": ("No report represents synthetic findings as real ones",      "P7",  "../../../tests/backend/test_reports_phase7.py"),
     "I11": ("No plain hash of a secret value crosses the LLM boundary",  "P6",  "../../../tests/backend/test_agent_phase6.py"),
-    "I12": ("Purge is idempotent and halts on inconsistency",            "P8",  None),
+    "I12": ("Purge is idempotent and halts on inconsistency",            "P8",  "../../../tests/backend/test_phase8_hardening.py"),
     "I13": ("Cancellation completes within the SLA",                     "P4",  "../../../tests/backend/test_scanner_phase4.py"),
     "I14": ("Asset identity is immutable",                               "P2",  "../../../tests/backend/test_backend_core.py"),
 }

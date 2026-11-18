@@ -165,6 +165,15 @@ services:
       LLM_PROVIDER_PORT: ${LLM_PROVIDER_PORT:-8443}
       LLM_MODEL: ${LLM_MODEL:-stand-in}
       LLM_PROXY_URL: ${LLM_PROXY_URL:-http://172.30.22.60:3128}
+      # Retention (phase 8). Deleting evidence is irreversible, so the flag
+      # defaults false and the purge endpoint is dry-run unless asked otherwise.
+      RETENTION_ENABLED: ${RETENTION_ENABLED:-false}
+      RETENTION_EVIDENCE_BLOB_DAYS: ${RETENTION_EVIDENCE_BLOB_DAYS:-90}
+      RETENTION_BATCH_LIMIT: ${RETENTION_BATCH_LIMIT:-200}
+      # API rate limiting: availability protection, on by default.
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-240}
+      RATE_LIMIT_WRITE_PER_MINUTE: ${RATE_LIMIT_WRITE_PER_MINUTE:-60}
       # No egress of its own: outbound exists only via the proxy (phase 5).
       HTTPS_PROXY: "http://172.30.22.60:3128"
       HTTP_PROXY: "http://172.30.22.60:3128"
@@ -239,6 +248,12 @@ services:
       # Hard false, not configurable: the worker is on no egress network and
       # never calls the agent. NET-C fails the whole check if this is true.
       LLM_ENABLED: "false"
+      # The scheduled purge runs here. The beat schedule only exists while the
+      # flag is true, and the task re-checks it before touching anything.
+      RETENTION_ENABLED: ${RETENTION_ENABLED:-false}
+      RETENTION_EVIDENCE_BLOB_DAYS: ${RETENTION_EVIDENCE_BLOB_DAYS:-90}
+      RETENTION_BATCH_LIMIT: ${RETENTION_BATCH_LIMIT:-200}
+      RETENTION_SCHEDULE_MINUTES: ${RETENTION_SCHEDULE_MINUTES:-1440}
       ZAP_BASE_URL: ${ZAP_BASE_URL:-http://172.30.10.10:8080}
       ZAP_API_KEY: ${ZAP_API_KEY:-}
       CANCELLATION_SLA_SECONDS: ${CANCELLATION_SLA_SECONDS:-120}

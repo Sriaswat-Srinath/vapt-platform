@@ -21,7 +21,7 @@ import datetime as dt
 import ipaddress
 from typing import Callable
 
-POLICY_VERSION = "1.0.0"
+POLICY_VERSION = "1.1.0"   # 1.1.0: gate 2 requires host hygiene as well as containment (ADR-0015)
 
 
 @dc.dataclass(frozen=True, slots=True)
@@ -98,8 +98,14 @@ class ScopeRequest:
     attested_distinct_active_identities: int = 0
     dual_control_min_identities: int = 2
 
-    # isolation
+    # isolation. TWO verdicts, deliberately not merged (ADR-0015):
+    #   isolation_passed     containment — container->internet and container->LAN blocked
+    #   host_hygiene_passed  no foreign 0.0.0.0 host listener reachable from the lab
+    # Gate 2 requires BOTH for live execution. They stay separate so a report can
+    # say which one failed, and so the recovery path can require containment only.
     isolation_passed: bool | None = None
+    host_hygiene_passed: bool | None = None
+    host_wildcard_listeners: str | None = None
     isolation_valid_until: dt.datetime | None = None
 
     # asset
@@ -178,11 +184,34 @@ def _g1(r: ScopeRequest) -> GateResult:
 
 
 def _g2(r: ScopeRequest) -> GateResult:
+    """Containment AND host hygiene, both required (ADR-0015).
+
+    Containment is the control: the scanner cannot reach the internet or the
+    LAN. Host hygiene is the environment: no foreign wildcard listener on the
+    host is reachable from the lab through its gateway. A scanner that can
+    reach an unrelated service on the operator's machine is out of scope even
+    though it never left the host, so both must hold before anything executes.
+
+    They are reported separately so a denial names which one failed, and so a
+    recovery path can require containment alone.
+    """
     if r.isolation_passed is None:
         return GateResult("lab_isolation_valid", False,
                           "no lab isolation check has been reported; run `make lab-check` and report it")
     if not r.isolation_passed:
         return GateResult("lab_isolation_valid", False, "the latest lab isolation check did not pass")
+    if r.host_hygiene_passed is None:
+        return GateResult("lab_isolation_valid", False,
+                          "the reported isolation check predates host-hygiene reporting; re-run "
+                          "`make lab-check` and report it before executing anything")
+    if not r.host_hygiene_passed:
+        listeners = (r.host_wildcard_listeners or "").strip()
+        detail = f" ({listeners})" if listeners else ""
+        return GateResult("lab_isolation_valid", False,
+                          "host hygiene failed: a wildcard host listener is reachable from the "
+                          f"lab through its gateway{detail}. Containment passed, so the scanner "
+                          "cannot reach the internet or the LAN, but it could reach that service. "
+                          "Resolve the listener or bind it to loopback; do not weaken this gate.")
     if r.isolation_valid_until is None or r.isolation_valid_until <= r.now:
         return GateResult("lab_isolation_valid", False,
                           f"the lab isolation check is stale (valid_until={r.isolation_valid_until})")

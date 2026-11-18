@@ -76,17 +76,34 @@ def read(blob: models.EvidenceBlob) -> bytes:
 
 
 def active_reference_count(session: Session, blob_id: Any) -> int:
-    """Computed by query, never cached (ADR-0011 R2 §7)."""
+    """Computed by query, never cached (ADR-0011 R2 §7).
+
+    Counts THREE kinds of reference, because all three break if the bytes go:
+      * evidence rows that have not already been marked purged,
+      * report pins that explicitly pin the blob,
+      * raw observations whose request/response bytes these are. Revalidation
+        re-reads those bytes, so purging them would silently change a future
+        verdict from different inputs. Provenance is a reference, not a hash.
+      * report artifacts stored in the same blob store. A generated report that
+        an analyst can still open is a live reference to its bytes.
+    """
     refs = int(session.execute(select(func.count()).select_from(models.Evidence).where(
         models.Evidence.blob_id == blob_id,
         models.Evidence.blob_purged_at.is_(None))).scalar_one())
+    observations = int(session.execute(
+        select(func.count()).select_from(models.RawObservation).where(
+            (models.RawObservation.request_blob_id == blob_id) |
+            (models.RawObservation.response_blob_id == blob_id))).scalar_one())
     pins = int(session.execute(
         select(func.count()).select_from(models.EvidencePin)
         .join(models.Evidence, models.Evidence.id == models.EvidencePin.evidence_id)
         .where(models.Evidence.blob_id == blob_id,
                models.EvidencePin.pins_blob.is_(True),
                models.EvidencePin.released_at.is_(None))).scalar_one())
-    return refs + pins
+    artifacts = int(session.execute(
+        select(func.count()).select_from(models.ReportArtifact).where(
+            models.ReportArtifact.artifact_blob_id == blob_id)).scalar_one())
+    return refs + pins + observations + artifacts
 
 
 class BlobStillReferenced(RuntimeError):

@@ -214,6 +214,33 @@ s.on('error',e=>{console.log(e.code);process.exit()});s.on('timeout',()=>{consol
 M_INET=$(js_err 1.1.1.1 443); M_LAN=$(js_err "${LAN_GW:-192.168.1.1}" 80); M_HOSTGW=$(js_err "$GW" 9); M_HOSTLAN=$(js_err "$(ip -o -4 addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1)" 9); M_PEER=$(js_err "${ZAP_IP:-172.30.10.10}" 8080)
 H_ZAP=$(timeout 4 bash -c "exec 3<>/dev/tcp/${ZAP_IP:-172.30.10.10}/8080" >/dev/null 2>&1 && echo REACHABLE || echo BLOCKED)
 classify() { case "$1" in REACHABLE) echo reachable;; ECONNREFUSED) echo "host-reachable-at-L3 (nothing listening)";; ENETUNREACH) echo "no-route";; TIMEOUT) echo "filtered-or-dropped";; *) echo "$1";; esac; }
+# PUB-2R MEASURES what PUB-2 only enumerates: can a lab container actually
+# reach each wildcard host listener through the lab gateway? PUB-2 is a static
+# observation and is deliberately conservative, because a listener that is
+# unreachable today may become reachable after any change to host firewalling,
+# Docker's rules or the other service's configuration.
+#
+# PUB-2R does NOT move the verdict. host_hygiene_passed still fails while a
+# foreign wildcard listener exists; this probe only records whether the lab can
+# presently reach it, so the owner decides with evidence rather than inference.
+PUB2R_SUMMARY="not evaluated"
+if [ -n "$hostwild" ]; then
+  reach_list=""
+  for spec in $hostwild; do
+    hp="${spec##*:}"
+    case "$hp" in ''|*[!0-9]*) continue;; esac
+    r=$(js_err "$GW" "$hp")
+    reach_list="$reach_list$hp=$r "
+    case "$r" in
+      REACHABLE) add "PUB-2R:$hp" "NOT-REACHABLE" "REACHABLE" false \
+                     "a lab container CAN reach the host wildcard listener on port $hp through the lab gateway";;
+      *)         add "PUB-2R:$hp" "NOT-REACHABLE" "$r" true \
+                     "a lab container cannot presently reach the host wildcard listener on port $hp ($(classify "$r"))";;
+    esac
+  done
+  PUB2R_SUMMARY="${reach_list:-none}"
+fi
+
 # isolation_passed : every I* probe  -> this is what the M3 scan gate consumes
 # access_passed    : every F* probe  -> workstation convenience (D19 forwarder)
 # passed           : both. Convenience must never move the scan gate either way.
@@ -222,7 +249,8 @@ for r in "${RESULTS[@]}"; do
   IFS='|' read -r id req obs ok det <<< "$r"
   case "$id" in
     F*)     [ "$ok" = true ] || access_passed=false;;
-    PUB-2)  : ;;   # observation only; recorded in host_hygiene_passed
+    PUB-2)   : ;;  # observation only; recorded in host_hygiene_passed
+    PUB-2R*) : ;;  # measurement only; recorded in host_listener_reachability
     *)      [ "$ok" = true ] || isolation_passed=false;;
   esac
   case "$id" in I2*|I3*) [ "$ok" = true ] || egress_blocked=false;; I4*) [ "$ok" = true ] || dns_contained=false;; esac
@@ -254,6 +282,7 @@ valid=$(date -u -d "+${TTL_MIN} minutes" +%Y-%m-%dT%H:%M:%SZ)
   echo "  },"
   echo "  \"host_wildcard_listeners\": \"$HOST_WILDCARD_LISTENERS\","
   echo "  \"host_hygiene_passed\": $HOST_HYGIENE,"
+  echo "  \"host_listener_reachability\": \"$PUB2R_SUMMARY\","
   echo "  \"isolation_passed\": $isolation_passed,"
   echo "  \"access_passed\": $access_passed,"
   echo "  \"passed\": $passed,"

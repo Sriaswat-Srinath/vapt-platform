@@ -8,7 +8,7 @@ import structlog
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from . import errors
+from . import errors, ratelimit
 from .api.v1 import router as v1_router
 from .config import settings
 from .logging_setup import configure
@@ -32,6 +32,42 @@ app.add_middleware(CORSMiddleware, allow_origins=["http://127.0.0.1:5173",
                                                   "http://127.0.0.1:8000"],
                    allow_credentials=False, allow_methods=["*"], allow_headers=["*"])
 app.include_router(v1_router, prefix=settings().api_base_path)
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    """Per-principal limiting. Availability protection, not a security control.
+
+    The principal is the bearer token's fingerprint where there is one, so one
+    analyst cannot exhaust another's budget, and an unauthenticated flood is
+    limited by source address instead. The token itself is never used as a key
+    and never logged.
+    """
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        import hashlib
+        principal = "t:" + hashlib.sha256(auth[7:].encode()).hexdigest()[:16]
+    else:
+        principal = "a:" + (request.client.host if request.client else "unknown")
+    allowed, remaining, retry_after, limiter = ratelimit.check(
+        principal=principal, method=request.method, path=request.url.path)
+    if not allowed:
+        log.warning("rate_limited", limiter=limiter, method=request.method,
+                    path=request.url.path)
+        return JSONResponse(
+            status_code=429,
+            media_type="application/problem+json",
+            headers={"Retry-After": str(retry_after)},
+            content={"type": "about:blank", "title": "Too many requests",
+                     "status": 429,
+                     "detail": (f"Rate limit exceeded for this principal. Retry in "
+                                f"{retry_after}s. This protects platform availability; it is "
+                                "not a scope or authorisation control."),
+                     "limiter": limiter})
+    response = await call_next(request)
+    if remaining >= 0:
+        response.headers["X-RateLimit-Remaining"] = str(remaining)
+    return response
 
 
 @app.middleware("http")
@@ -63,4 +99,6 @@ def startup() -> None:
              scanner_execution_enabled=s.scanner_execution_enabled,
              active_scan_enabled=s.active_scan_enabled,
              dual_control_flag=s.dual_control_available,
-             default_adapter=s.default_scanner_adapter, llm_enabled=s.llm_enabled)
+             default_adapter=s.default_scanner_adapter, llm_enabled=s.llm_enabled,
+             retention_enabled=s.retention_enabled,
+             rate_limit_enabled=s.rate_limit_enabled)

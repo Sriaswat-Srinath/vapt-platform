@@ -1,0 +1,148 @@
+{
+  "_comment": [
+    "Detection evaluation dataset.",
+    "",
+    "WHAT THIS MEASURES: whether the normalisation, mapping and validation pipeline reaches the",
+    "CORRECT verdict for constructed evidence whose ground truth is known by construction.",
+    "",
+    "WHAT IT DOES NOT MEASURE: real-world detection accuracy. Every case here is a hand-authored",
+    "ZAP-shaped alert over a hand-authored response. Real scanner output differs in volume, field",
+    "shape and noise. A perfect score here means the engine is self-consistent, not that the",
+    "platform finds real vulnerabilities.",
+    "",
+    "Each case names the taxonomy category, the scenario, the ground truth, and the state the",
+    "engine is expected to reach. `expected_state` is what a CORRECT engine returns — for a case",
+    "whose ground truth is 'not a vulnerability', that is false_positive."
+  ],
+  "dataset_version": "1.0.0",
+  "cases": [
+    {
+      "id": "EV-01", "category": "security_misconfiguration",
+      "scenario": "CSP header absent across every stored HTML response, coverage complete",
+      "ground_truth": "vulnerable", "catalogue_key": "missing-security-header-csp",
+      "expected_state": "confirmed",
+      "rationale": "negative evidence is sound only under complete coverage, which holds here"
+    },
+    {
+      "id": "EV-02", "category": "security_misconfiguration",
+      "scenario": "Scanner claims X-Content-Type-Options missing on a response that SETS it",
+      "ground_truth": "not_vulnerable", "catalogue_key": "missing-security-header-content-type-options",
+      "expected_state": "false_positive",
+      "rationale": "the stored response contradicts the claim"
+    },
+    {
+      "id": "EV-03", "category": "security_misconfiguration",
+      "scenario": "Browser security header claimed missing on a JSON API endpoint",
+      "ground_truth": "not_applicable", "catalogue_key": "missing-security-header-csp",
+      "expected_state": "not_applicable",
+      "rationale": "a browser policy header does not apply to a non-rendered response"
+    },
+    {
+      "id": "EV-04", "category": "injection",
+      "scenario": "Payload reflected UNENCODED into an HTML context",
+      "ground_truth": "vulnerable", "catalogue_key": "reflected-xss",
+      "expected_state": "confirmed",
+      "rationale": "reflection is present in the stored body and is not encoded"
+    },
+    {
+      "id": "EV-05", "category": "injection",
+      "scenario": "Payload reflected but HTML-ENCODED in the response",
+      "ground_truth": "not_vulnerable", "catalogue_key": "reflected-xss",
+      "expected_state": "false_positive",
+      "rationale": "encoding is the defence; the claim does not survive the evidence"
+    },
+    {
+      "id": "EV-06", "category": "session_management",
+      "scenario": "Set-Cookie carries no HttpOnly attribute",
+      "ground_truth": "vulnerable", "catalogue_key": "cookie-missing-httponly",
+      "expected_state": "confirmed",
+      "rationale": "attribute names are wholly observable in the stored response"
+    },
+    {
+      "id": "EV-07", "category": "session_management",
+      "scenario": "Scanner claims HttpOnly missing on a cookie that HAS it",
+      "ground_truth": "not_vulnerable", "catalogue_key": "cookie-missing-httponly",
+      "expected_state": "false_positive",
+      "rationale": "the attribute is present; a cookie VALUE containing the word does not count"
+    },
+    {
+      "id": "EV-08", "category": "session_management",
+      "scenario": "Set-Cookie carries no SameSite attribute",
+      "ground_truth": "vulnerable", "catalogue_key": "cookie-missing-samesite",
+      "expected_state": "confirmed", "rationale": "as EV-06"
+    },
+    {
+      "id": "EV-09", "category": "cryptographic_failures",
+      "scenario": "Login form posts credentials to a cleartext HTTP action",
+      "ground_truth": "vulnerable", "catalogue_key": "cleartext-credential-transmission",
+      "expected_state": "confirmed",
+      "rationale": "the reported evidence string is present in the stored body"
+    },
+    {
+      "id": "EV-10", "category": "cryptographic_failures",
+      "scenario": "Auth token written to localStorage by a served script",
+      "ground_truth": "vulnerable", "catalogue_key": "sensitive-data-in-client-storage",
+      "expected_state": "confirmed", "rationale": "the sink is present in the stored script body"
+    },
+    {
+      "id": "EV-11", "category": "cryptographic_failures",
+      "scenario": "HSTS claimed missing on a response that SETS Strict-Transport-Security",
+      "ground_truth": "not_vulnerable", "catalogue_key": "missing-security-header-hsts",
+      "expected_state": "false_positive", "rationale": "the stored response contradicts the claim"
+    },
+    {
+      "id": "EV-12", "category": "client_side",
+      "scenario": "DOM sink writes a URL parameter into innerHTML, payload reflected unencoded",
+      "ground_truth": "vulnerable", "catalogue_key": "dom-xss",
+      "expected_state": "confirmed",
+      "rationale": "reflected unencoded in an HTML context; the sink is visible in the body"
+    },
+    {
+      "id": "EV-13", "category": "client_side",
+      "scenario": "Third-party script tag served with no integrity attribute",
+      "ground_truth": "vulnerable", "catalogue_key": "subresource-without-integrity",
+      "expected_state": "confirmed", "rationale": "the tag is present in the stored body"
+    },
+    {
+      "id": "EV-14", "category": "information_disclosure",
+      "scenario": "Server version disclosed in a response header on a JSON endpoint",
+      "ground_truth": "vulnerable", "catalogue_key": "server-version-disclosure",
+      "expected_state": "confirmed",
+      "rationale": "this is NOT a browser-policy header, so a JSON content type does not excuse it"
+    },
+    {
+      "id": "EV-15", "category": "information_disclosure",
+      "scenario": "Session identifier present in a URL in the response body",
+      "ground_truth": "vulnerable", "catalogue_key": "session-id-in-url",
+      "expected_state": "confirmed", "rationale": "the evidence string is located in the stored body"
+    },
+    {
+      "id": "EV-16", "category": "information_disclosure",
+      "scenario": "Debug error message claimed, but the string is ABSENT from the stored body",
+      "ground_truth": "not_vulnerable", "catalogue_key": "information-disclosure-debug-errors",
+      "expected_state": "false_positive",
+      "rationale": "a pattern claim whose pattern is not in the body does not survive"
+    },
+    {
+      "id": "EV-17", "category": "information_disclosure",
+      "scenario": "Timestamp disclosure whose evidence string IS present",
+      "ground_truth": "vulnerable", "catalogue_key": "timestamp-disclosure",
+      "expected_state": "confirmed", "rationale": "the evidence is located in the stored body"
+    },
+    {
+      "id": "EV-18", "category": "broken_access_control",
+      "scenario": "Anti-CSRF token missing on a form",
+      "ground_truth": "indeterminate_without_active_testing",
+      "catalogue_key": "missing-anti-csrf-token",
+      "expected_state": "candidate",
+      "rationale": "no rule pack can confirm a CSRF claim from a stored response alone; the engine must say so rather than assert"
+    },
+    {
+      "id": "EV-19", "category": "unmapped_detection",
+      "scenario": "A scanner rule with no catalogue entry",
+      "ground_truth": "unknown", "catalogue_key": null,
+      "expected_state": "candidate",
+      "rationale": "kept and surfaced as unmapped rather than dropped or guessed at"
+    }
+  ]
+}

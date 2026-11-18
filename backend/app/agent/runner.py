@@ -18,7 +18,6 @@ and it never reaches the validation engine, the gate chain or a scanner.
 """
 from __future__ import annotations
 import datetime as dt
-import json
 from typing import Any
 
 from sqlalchemy import select

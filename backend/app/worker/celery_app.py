@@ -25,3 +25,15 @@ celery.conf.update(
     task_default_queue="vapt",
     imports=("app.worker.tasks",),
 )
+
+# The scheduled purge exists only while retention is enabled. A beat schedule
+# that fires into a disabled platform would be a standing instruction to delete
+# evidence that nobody has authorised; the task re-checks the flag as well.
+if settings().retention_enabled:
+    celery.conf.beat_schedule = {
+        "retention-purge": {
+            "task": "vapt.retention_purge",
+            "schedule": float(settings().retention_schedule_minutes * 60),
+            "kwargs": {"dry_run": False},
+        },
+    }

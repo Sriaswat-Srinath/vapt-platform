@@ -56,6 +56,25 @@ class Settings(BaseSettings):
     llm_max_findings: int = 25
     llm_timeout_seconds: int = 30
 
+    # ---- retention (phase 8) -----------------------------------------------
+    # Purge deletes UNREDACTED BLOBS only, and only when nothing references
+    # them. Disabled by default: deleting evidence is irreversible, so it is an
+    # explicit operator decision, and the API's purge endpoint is dry-run
+    # unless asked otherwise.
+    retention_enabled: bool = False
+    retention_evidence_blob_days: int = 90
+    retention_batch_limit: int = 200
+    retention_schedule_minutes: int = 1440
+
+    # ---- API rate limiting (phase 8) ---------------------------------------
+    # Availability protection, not a security boundary: a limiter that fails
+    # closed would turn a Redis blip into an outage. On Redis failure the
+    # in-process limiter still applies, so there is always A limit.
+    rate_limit_enabled: bool = True
+    rate_limit_per_minute: int = 240
+    rate_limit_write_per_minute: int = 60
+    rate_limit_burst: int = 30
+
     @field_validator("default_scanner_adapter")
     @classmethod
     def _adapter(cls, v: str) -> str:

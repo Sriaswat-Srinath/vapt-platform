@@ -1,0 +1,90 @@
+# CI for the VAPT platform.
+#
+# What CAN run on a hosted runner: the lint, the type check, and every test
+# that is a function of code alone — the gate chain, the validation engine, the
+# taxonomy, the coverage calculation, the agent boundary and its parser, the
+# redaction rules, fingerprinting and CVSS parsing. These are the decision
+# surfaces, and they need no container.
+#
+# What CANNOT: the lab containment probes, the network architecture probes and
+# the API integration suites. They measure a running, multi-network Docker
+# deployment with an isolated lab, and a hosted runner cannot reproduce it. A
+# green CI run therefore does NOT mean the platform is contained — that is
+# established by `make lab-check`, `make net-verify` and the integration suites
+# on the machine that runs the lab, and is recorded in docs/.
+#
+# The job is deliberately honest about that split rather than pretending to a
+# coverage it does not have.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    name: lint, types and code-only tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff==0.8.4 mypy==1.13.0 pytest==8.3.4
+          pip install -r backend/requirements.txt
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Type check
+        run: mypy
+
+      - name: Invariant manifest
+        # Fails if an invariant is still skipped after its milestone landed.
+        run: pytest backend/tests/invariants -q
+
+      - name: Code-only tests
+        env:
+          REDACTION_HMAC_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
+          SECRET_KEY: "ci-secret-key-not-used-to-authenticate-anything"
+          DATABASE_URL: "postgresql+psycopg://unused:unused@127.0.0.1:1/unused"
+        run: |
+          pytest -q \
+            tests/backend/test_taxonomy_coverage.py \
+            tests/backend/test_agent_phase6.py \
+            tests/backend/test_phase8_hardening.py \
+            tests/backend/test_findings_phase5.py \
+            tests/backend/test_discovery.py \
+            -k "not api and not endpoint and not over_the_api" \
+            --deselect tests/backend/test_findings_phase5.py::test_evidence_content_requires_justification_for_raw
+
+      - name: Frontend type check and build
+        run: |
+          cd frontend
+          npm ci
+          npx tsc --noEmit
+          npx vite build
+
+  integration:
+    name: integration (self-hosted, lab required)
+    # Only runs where the lab exists. On GitHub's runners this job is skipped
+    # rather than faked.
+    if: ${{ false }}
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - run: make lab-up net-up db-migrate db-seed
+      - run: make lab-check
+      - run: make net-verify
+      - run: pytest tests -q

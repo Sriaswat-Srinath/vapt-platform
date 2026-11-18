@@ -1,0 +1,82 @@
+# Tooling configuration only. The platform is not packaged or installed from
+# here: the API and worker run from the image, and the test suites run from the
+# repository root.
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["backend", "tests", "scripts"]
+extend-exclude = ["backend/migrations/versions", "frontend", ".lab-state"]
+
+[tool.ruff.lint]
+# A deliberately modest set, chosen so a failure means something is wrong rather
+# than merely unfashionable. Style that the codebase already applies
+# consistently is enforced; opinionated rewrites are not.
+# Chosen so that a CI failure means something is WRONG, not merely unfashionable.
+# Cosmetic families (import ordering, py312 idiom rewrites, collection-literal
+# style) are deliberately absent: this codebase has a consistent house style,
+# and a linter that reformats 300 lines across the safety surfaces to satisfy
+# taste is a worse trade than one that stays quiet until it finds a defect.
+select = [
+    "F",         # pyflakes: undefined names, unused imports/variables, f-string bugs
+    "E7", "E9",  # comparison/except/lambda mistakes, syntax errors
+    "W6",        # deprecated constructs
+    "B",         # bugbear: mutable defaults, shadowed loop vars, assert-on-tuple
+    "S",         # bandit: the security rules that matter here
+]
+ignore = [
+    "B008",      # FastAPI's Depends() in defaults is the framework's idiom
+    "S101",      # assert is how the tests assert
+    "S104",      # bind-all is measured by the probes, not guessed at by a linter
+    "S105",      # "hardcoded password" false-positives on header and field names
+    "S110",      # try/except/pass is deliberate where it is used, and commented
+    "S310",      # urllib with a literal http:// URL to our own loopback forwarder
+    "S311",      # no cryptographic use of `random` exists; tokens use `secrets`
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests reach into internals deliberately, and shell out to docker to measure
+# the real system rather than a mock.
+# Tests shell out to docker deliberately (that is how the real system is
+# measured), reuse imported fixtures by name, and use semicolons in compact
+# probe one-liners.
+"tests/**" = ["S603", "S607", "S108", "S608", "S106", "F811", "E741", "E702", "B007"]
+"backend/tests/**" = ["S603", "S607", "S108", "F811", "E741", "E702"]
+"scripts/**" = ["S603", "S607", "S108", "S608", "E702", "B007"]
+# Raw SQL in a migration is the point of a migration.
+"backend/migrations/**" = ["S608"]
+
+[tool.mypy]
+python_version = "3.12"
+# `app` is an implicit namespace package (no __init__.py at backend/app), so
+# mypy needs the search path and the package name rather than a file glob.
+mypy_path = "backend"
+packages = ["app"]
+namespace_packages = true
+explicit_package_bases = true
+exclude = "backend/migrations"
+ignore_missing_imports = true
+# Pragmatic rather than strict: the value here is catching a wrong attribute or
+# a None that cannot be, not relitigating every annotation. Strictness is raised
+# module by module as each one is cleaned, starting with the safety surfaces.
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+# The safety-critical, dependency-free modules are held to a higher standard:
+# these are the ones a wrong type would quietly change a decision in.
+module = [
+    "app.safety.scope_policy",
+    "app.validation.engine",
+    "app.taxonomy",
+    "app.coverage",
+    "app.agent.boundary",
+    "app.agent.tools",
+    "app.agent.parsing",
+    "app.retention_rules",
+    "app.ratelimit",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true

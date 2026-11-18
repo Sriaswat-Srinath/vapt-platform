@@ -1,10 +1,10 @@
 """System endpoints: health, readiness, capabilities, isolation ingest."""
 from __future__ import annotations
 import datetime as dt
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
-from ... import audit, errors, models, schemas, services
+from ... import audit, errors, models, retention, schemas, services
 from ...config import settings
 from ...db import get_session
 from ...deps import Principal, require_role, trace_id
@@ -110,6 +110,62 @@ def report_isolation(payload: schemas.IsolationReport,
             "valid_until": row.valid_until}
 
 
+@router.get("/system/retention/policy")
+def retention_policy(p: Principal = Depends(require_role("analyst", "approver", "admin"))):
+    """What would be purged, and what never is."""
+    return retention.policy()
+
+
+@router.post("/system/retention/purge", status_code=201)
+def retention_purge(dry_run: bool = Query(default=True),
+                    limit: int | None = Query(default=None, le=5000),
+                    older_than_days: int | None = Query(default=None, ge=0, le=3650),
+                    session: Session = Depends(get_session),
+                    p: Principal = Depends(require_role("admin")),
+                    trace: str = Depends(trace_id)):
+    """Run one purge pass. ADMIN only, and DRY RUN unless asked otherwise.
+
+    Deleting evidence is irreversible, so the destructive form is opt-in on
+    every call rather than a stored setting. A run that halts is still
+    recorded — that row is the point of the invariant.
+    """
+    s = settings()
+    if not dry_run and not s.retention_enabled:
+        raise errors.conflict(
+            "retention-disabled", "Retention purge is disabled",
+            "RETENTION_ENABLED is false. A dry run is permitted; deleting is not.")
+    started = dt.datetime.now(dt.timezone.utc)
+    # `older_than_days` overrides the configured window for THIS run only and is
+    # recorded on the row. 0 means "everything unreferenced", which is a real
+    # operational need and is why the destructive form needs admin, the
+    # retention flag AND an explicit dry_run=false.
+    outcome = retention.run(session, dry_run=dry_run, limit=limit, days=older_than_days)
+    row = retention.record(session, outcome, triggered_by=p.id, started_at=started)
+    audit.record(session, action="retention_purge", actor_kind="human", actor_id=p.id,
+                 outcome=outcome.state, subject_type="purge_run", subject_id=str(row.id),
+                 trace_id=trace, detail=outcome.as_dict())
+    session.commit()
+    return {"id": str(row.id), **outcome.as_dict(),
+            "note": ("dry run: nothing was deleted" if outcome.dry_run else
+                     "blobs were deleted; evidence rows remain, marked purged")}
+
+
+@router.get("/system/retention/runs")
+def retention_runs(limit: int = Query(default=20, le=100),
+                   session: Session = Depends(get_session),
+                   p: Principal = Depends(require_role("analyst", "approver", "admin"))):
+    rows = session.execute(select(models.PurgeRun).order_by(
+        models.PurgeRun.started_at.desc()).limit(limit)).scalars().all()
+    return [{"id": str(r.id), "state": r.state, "dry_run": r.dry_run,
+             "retention_version": r.retention_version,
+             "evidence_blob_days": r.evidence_blob_days, "scanned": r.scanned,
+             "eligible": r.eligible, "purged": r.purged,
+             "skipped_referenced": r.skipped_referenced,
+             "bytes_reclaimed": r.bytes_reclaimed, "halt_reason": r.halt_reason,
+             "halt_detail": r.halt_detail, "triggered_by": r.triggered_by,
+             "started_at": r.started_at, "finished_at": r.finished_at} for r in rows]
+
+
 @router.get("/system/scanner/state")
 def scanner_state(session: Session = Depends(get_session),
                   p: Principal = Depends(require_role("analyst", "approver"))):
@@ -125,9 +181,10 @@ def scanner_state(session: Session = Depends(get_session),
                           "dirty_reason": s.dirty_reason, "dirty_since": s.dirty_since,
                           "requires_operator_restart": s.requires_operator_restart,
                           "last_reset_at": s.last_reset_at} for s in states],
-        "held_leases": [{"adapter": l.adapter_name, "job_id": str(l.job_id) if l.job_id else None,
-                         "holder": l.holder_worker_id, "acquired_at": l.acquired_at,
-                         "heartbeat_at": l.heartbeat_at} for l in leases],
+        "held_leases": [{"adapter": lease.adapter_name,
+                         "job_id": str(lease.job_id) if lease.job_id else None,
+                         "holder": lease.holder_worker_id, "acquired_at": lease.acquired_at,
+                         "heartbeat_at": lease.heartbeat_at} for lease in leases],
     }
 
 

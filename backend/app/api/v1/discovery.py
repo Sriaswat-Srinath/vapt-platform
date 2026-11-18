@@ -2,10 +2,9 @@
 from __future__ import annotations
 import datetime as dt
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from ... import audit, errors, models, services
-from ...config import settings
 from ...db import get_session
 from ...deps import Principal, require_role, trace_id
 
@@ -41,16 +40,16 @@ def start_discovery(asset_id: str, source: str = Query(default="fixture", patter
             subject_type="discovery_run")
         if not result.allowed:
             session.commit()
+            failure = result.first_failure
             raise errors.conflict(
                 "scope-denied", "Live discovery denied by scope policy",
-                f"Gate {result.first_failure.gate!r} failed",
+                f"Gate {failure.gate!r} failed" if failure else "a gate denied the request",
                 {"scope_decision": result.as_dict()})
     run = models.DiscoveryRun(
         asset_id=asset.id, source=source, state="queued",
         profile_key=(profile_key or "zap-passive") if source == "live" else None,
         trace_id=trace, created_by=p.analyst.id,
-        scope_grant_id=(services.active_grant(session, asset.id).id
-                        if services.active_grant(session, asset.id) else None))
+        scope_grant_id=grant.id if (grant := services.active_grant(session, asset.id)) else None)
     session.add(run)
     session.flush()
     audit.record(session, action="discovery_requested", actor_kind="human", actor_id=p.id,

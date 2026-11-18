@@ -10,9 +10,9 @@ constraints wherever possible, so they hold even under direct SQL:
 from __future__ import annotations
 import datetime as dt
 from typing import Any
-from sqlalchemy import (JSON, BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey,
+from sqlalchemy import (BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey,
                         Identity, Integer, Numeric, String, Text, UniqueConstraint, func)
-from sqlalchemy.dialects.postgresql import ARRAY, INET, JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from .ids import uuid7
 
@@ -753,6 +753,31 @@ class RiskScore(Base):
 
 
 # --------------------------------------------------------------- reporting ----
+class PurgeRun(Base):
+    """One retention purge pass, recorded whatever the outcome.
+
+    A HALTED run is the row that matters: it records that the store and the
+    database disagreed and that nothing further was deleted (invariant I12).
+    """
+    __tablename__ = "purge_runs"
+    id: Mapped[Any] = _pk()
+    state: Mapped[str] = mapped_column(String(16), nullable=False)      # completed | halted
+    dry_run: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    retention_version: Mapped[str] = mapped_column(String(20), nullable=False)
+    evidence_blob_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    scanned: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    eligible: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    purged: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    skipped_referenced: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    bytes_reclaimed: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    halt_reason: Mapped[str | None] = mapped_column(String(60))
+    halt_detail: Mapped[str | None] = mapped_column(Text)
+    triggered_by: Mapped[str | None] = mapped_column(String(64))
+    started_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[dt.datetime] = _now()
+
+
 class AgentRun(Base):
     """One bounded agent pass (L3, advisory).
 

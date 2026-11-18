@@ -6,14 +6,13 @@ validation records a new event only when the state actually changes.
 """
 from __future__ import annotations
 import datetime as dt
-import re
 from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from . import audit, models
 from .discovery import extractors
 from .evidence import redaction, store
-from .normalization import mapper, zap_mapping
+from .normalization import mapper
 from .normalization import zap_mapping as zm
 from .validation import engine as ve
 from .risk import cvss
@@ -77,7 +76,7 @@ def _validation_inputs(*, nf: mapper.NormalizedFinding, coverage_complete: bool,
             absent = 1
     status = 0
     evidence = nf.scanner_evidence
-    found = bool(evidence) and bool(resp_body) and evidence in resp_body
+    found = bool(evidence) and bool(resp_body) and (evidence or "") in resp_body
     content_type = resp_headers.get("content-type", "")
     html = "html" in content_type.lower()
     unencoded = bool(evidence) and found and not any(
@@ -89,6 +88,10 @@ def _validation_inputs(*, nf: mapper.NormalizedFinding, coverage_complete: bool,
     set_cookie = resp_headers.get("set-cookie") if has_response else None
     cookie_attrs = extractors.cookie_attributes(set_cookie)
     claimed = zm.cookie_attribute_claim(nf.adapter_rule_id)
+    # Which header claims are BROWSER POLICY (and so meaningless on a JSON
+    # response) and which apply to any response at all.
+    browser_policy = (nf.catalogue_key or "").startswith("missing-security-header") or \
+        (nf.catalogue_key or "") == "cache-control-directives"
     return ve.ValidationInputs(
         evidence_class=nf.evidence_class, coverage_complete=coverage_complete,
         status_codes=(status,) if status else (),
@@ -103,7 +106,8 @@ def _validation_inputs(*, nf: mapper.NormalizedFinding, coverage_complete: bool,
         set_cookie_count=1 if set_cookie else 0,
         cookie_attributes_present=cookie_attrs,
         cookie_attribute_claimed_missing=claimed,
-        transport_is_cleartext=transport_is_cleartext)
+        transport_is_cleartext=transport_is_cleartext,
+        claim_is_browser_policy=browser_policy)
 
 
 def _attach_cvss(session: Session, finding: models.Finding) -> models.RiskScore | None:
@@ -175,7 +179,6 @@ def process_job(session: Session, job: models.ScanJob, asset: models.Asset) -> d
             session.add(models.FindingObservation(finding_id=finding.id,
                                                   raw_observation_id=obs.id))
         # ---- evidence, redacted on write --------------------------------
-        payload = obs.payload or {}
         req_text = resp_text = None
         if obs.request_blob_id:
             blob = session.get(models.EvidenceBlob, obs.request_blob_id)

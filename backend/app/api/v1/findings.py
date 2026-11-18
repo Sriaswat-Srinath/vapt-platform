@@ -1,6 +1,7 @@
 """Findings, evidence and validation history."""
 from __future__ import annotations
 import datetime as dt
+from typing import Any
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -9,6 +10,12 @@ from ...db import get_session
 from ...deps import Principal, require_role, trace_id
 
 router = APIRouter()
+
+
+def _cvss_base(session: Session, finding_id: Any) -> float | None:
+    risk = _risk(session, finding_id) or {}
+    cvss = risk.get("cvss")
+    return cvss.get("base") if isinstance(cvss, dict) else None
 
 
 def _finding_or_404(session: Session, finding_id: str) -> models.Finding:
@@ -66,7 +73,7 @@ def list_findings(asset_id: str | None = None, job_id: str | None = None,
              "coverage_complete": f.coverage_complete,
              "occurrence_count": f.occurrence_count,
              "quarantined": f.quarantined_at is not None,
-             "cvss_base": (_risk(session, f.id) or {}).get("cvss", {}).get("base"),
+             "cvss_base": _cvss_base(session, f.id),
              "first_seen_at": f.first_seen_at, "last_seen_at": f.last_seen_at} for f in rows]
 
 

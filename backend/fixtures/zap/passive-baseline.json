@@ -7,7 +7,11 @@
     "Alerts deliberately span all five validation outcomes so the engine's discrimination is demonstrable: a claim contradicted by the stored response is a false positive, a browser header on a JSON endpoint is not applicable, an unmapped rule stays a candidate.",
     "Cookie alerts (10010/10054) were added with the taxonomy work: one cookie genuinely lacks",
     "HttpOnly/SameSite and one carries both, so the session-management rule pack is exercised in",
-    "BOTH directions. Cookie values are the literal string SYNTHETIC-FIXTURE-VALUE."
+    "BOTH directions. Cookie values are the literal string SYNTHETIC-FIXTURE-VALUE.",
+    "Phase 8 added fixtures that exercise the cryptographic-failures, client-side and",
+    "information-disclosure rule paths, in BOTH directions: alerts whose evidence is present in the",
+    "stored response (confirmable) and alerts whose evidence is absent or contradicted (false",
+    "positives). Every value is synthetic; no request has been made to any application."
   ],
   "zap_version": "2.17.0",
   "alerts": [
@@ -282,6 +286,159 @@
       "cweid": "1004",
       "wascid": "13",
       "messageId": "91"
+    },
+    {
+      "pluginId": "10041",
+      "alertRef": "10041-1",
+      "name": "Secure Pages Include Mixed Content / cleartext credentials",
+      "riskdesc": "High (Medium)",
+      "risk": "High",
+      "confidence": "Medium",
+      "url": "http://shop.brakes-vapt.test:3000/login",
+      "method": "GET",
+      "param": "password",
+      "evidence": "action=\"http://shop.brakes-vapt.test:3000/rest/user/login\"",
+      "description": "Synthetic fixture alert for Secure Pages Include Mixed Content / cleartext credentials.",
+      "solution": "See the catalogue entry.",
+      "cweid": "319",
+      "wascid": "13",
+      "messageId": "100"
+    },
+    {
+      "pluginId": "10044",
+      "alertRef": "10044-1",
+      "name": "Sensitive Information in Browser Storage",
+      "riskdesc": "Medium (Medium)",
+      "risk": "Medium",
+      "confidence": "Medium",
+      "url": "http://shop.brakes-vapt.test:3000/main.js",
+      "method": "GET",
+      "param": "authToken",
+      "evidence": "localStorage.setItem(\"authToken\"",
+      "description": "Synthetic fixture alert for Sensitive Information in Browser Storage.",
+      "solution": "See the catalogue entry.",
+      "cweid": "922",
+      "wascid": "13",
+      "messageId": "101"
+    },
+    {
+      "pluginId": "10035",
+      "alertRef": "10035-1",
+      "name": "Strict-Transport-Security Header Not Set",
+      "riskdesc": "Medium (Medium)",
+      "risk": "Medium",
+      "confidence": "Medium",
+      "url": "http://shop.brakes-vapt.test:3000/secure-page",
+      "method": "GET",
+      "param": "",
+      "evidence": "",
+      "description": "Synthetic fixture alert for Strict-Transport-Security Header Not Set.",
+      "solution": "See the catalogue entry.",
+      "cweid": "319",
+      "wascid": "13",
+      "messageId": "102"
+    },
+    {
+      "pluginId": "40026",
+      "alertRef": "40026-1",
+      "name": "Cross Site Scripting (DOM Based)",
+      "riskdesc": "High (Medium)",
+      "risk": "High",
+      "confidence": "Medium",
+      "url": "http://shop.brakes-vapt.test:3000/search-dom",
+      "method": "GET",
+      "param": "q",
+      "evidence": "<script>dom()</script>",
+      "description": "Synthetic fixture alert for Cross Site Scripting (DOM Based).",
+      "solution": "See the catalogue entry.",
+      "cweid": "79",
+      "wascid": "13",
+      "messageId": "103"
+    },
+    {
+      "pluginId": "90003",
+      "alertRef": "90003-1",
+      "name": "Sub Resource Integrity Attribute Missing",
+      "riskdesc": "Low (Medium)",
+      "risk": "Low",
+      "confidence": "Medium",
+      "url": "http://shop.brakes-vapt.test:3000/",
+      "method": "GET",
+      "param": "",
+      "evidence": "<script src=\"https://cdn.example.test/analytics.js\"></script>",
+      "description": "Synthetic fixture alert for Sub Resource Integrity Attribute Missing.",
+      "solution": "See the catalogue entry.",
+      "cweid": "494",
+      "wascid": "13",
+      "messageId": "104"
+    },
+    {
+      "pluginId": "10036",
+      "alertRef": "10036-1",
+      "name": "Server Leaks Version Information",
+      "riskdesc": "Low (Medium)",
+      "risk": "Low",
+      "confidence": "Medium",
+      "url": "http://shop.brakes-vapt.test:3000/api/Products",
+      "method": "GET",
+      "param": "server",
+      "evidence": "Express/4.17.1",
+      "description": "Synthetic fixture alert for Server Leaks Version Information.",
+      "solution": "See the catalogue entry.",
+      "cweid": "200",
+      "wascid": "13",
+      "messageId": "105"
+    },
+    {
+      "pluginId": "00003",
+      "alertRef": "00003-1",
+      "name": "Session ID in URL Rewrite",
+      "riskdesc": "Medium (Medium)",
+      "risk": "Medium",
+      "confidence": "Medium",
+      "url": "http://shop.brakes-vapt.test:3000/track-result",
+      "method": "GET",
+      "param": "jsessionid",
+      "evidence": "jsessionid=SYNTHETICSESSIONVALUE1",
+      "description": "Synthetic fixture alert for Session ID in URL Rewrite.",
+      "solution": "See the catalogue entry.",
+      "cweid": "598",
+      "wascid": "13",
+      "messageId": "106"
+    },
+    {
+      "pluginId": "10023",
+      "alertRef": "10023-1",
+      "name": "Information Disclosure - Debug Error Messages",
+      "riskdesc": "Medium (Medium)",
+      "risk": "Medium",
+      "confidence": "Medium",
+      "url": "http://shop.brakes-vapt.test:3000/contact-page",
+      "method": "GET",
+      "param": "",
+      "evidence": "java.lang.NullPointerException",
+      "description": "Synthetic fixture alert for Information Disclosure - Debug Error Messages.",
+      "solution": "See the catalogue entry.",
+      "cweid": "209",
+      "wascid": "13",
+      "messageId": "107"
+    },
+    {
+      "pluginId": "10202",
+      "alertRef": "10202-1",
+      "name": "Absence of Anti-CSRF Tokens",
+      "riskdesc": "Medium (Low)",
+      "risk": "Medium",
+      "confidence": "Low",
+      "url": "http://shop.brakes-vapt.test:3000/contact",
+      "method": "GET",
+      "param": "",
+      "evidence": "<form method=\"post\" action=\"/contact\">",
+      "description": "Synthetic fixture alert: a form with no anti-CSRF token.",
+      "solution": "See the catalogue entry.",
+      "cweid": "352",
+      "wascid": "9",
+      "messageId": "108"
     }
   ],
   "messages": {
@@ -350,6 +507,60 @@
       "requestBody": "",
       "responseHeader": "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nSet-Cookie: session=SYNTHETIC-FIXTURE-VALUE; Path=/; HttpOnly; SameSite=Lax\r\n\r\n",
       "responseBody": "<!doctype html><html><body><form id=\"login\"></form></body></html>"
+    },
+    "100": {
+      "requestHeader": "GET /login HTTP/1.1\r\nHost: shop.brakes-vapt.test:3000\r\nUser-Agent: ZAP\r\n\r\n",
+      "requestBody": "",
+      "responseHeader": "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
+      "responseBody": "<html><body><form action=\"http://shop.brakes-vapt.test:3000/rest/user/login\" method=\"post\"><input type=\"password\" name=\"password\"></form></body></html>"
+    },
+    "101": {
+      "requestHeader": "GET /main.js HTTP/1.1\r\nHost: shop.brakes-vapt.test:3000\r\nUser-Agent: ZAP\r\n\r\n",
+      "requestBody": "",
+      "responseHeader": "HTTP/1.1 200 OK\r\nContent-Type: application/javascript\r\n\r\n",
+      "responseBody": "function save(t){ localStorage.setItem(\"authToken\", t); }"
+    },
+    "102": {
+      "requestHeader": "GET /secure-page HTTP/1.1\r\nHost: shop.brakes-vapt.test:3000\r\nUser-Agent: ZAP\r\n\r\n",
+      "requestBody": "",
+      "responseHeader": "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nStrict-Transport-Security: max-age=31536000\r\n\r\n",
+      "responseBody": "<html><body>secure</body></html>"
+    },
+    "103": {
+      "requestHeader": "GET /search-dom?q=%3Cscript%3Edom()%3C/script%3E HTTP/1.1\r\nHost: shop.brakes-vapt.test:3000\r\nUser-Agent: ZAP\r\n\r\n",
+      "requestBody": "",
+      "responseHeader": "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
+      "responseBody": "<html><body><div id=\"out\"></div><script>document.getElementById(\"out\").innerHTML=location.search.split(\"q=\")[1];</script><p>you searched <script>dom()</script></p></body></html>"
+    },
+    "104": {
+      "requestHeader": "GET / HTTP/1.1\r\nHost: shop.brakes-vapt.test:3000\r\nUser-Agent: ZAP\r\n\r\n",
+      "requestBody": "",
+      "responseHeader": "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
+      "responseBody": "<html><head><script src=\"https://cdn.example.test/analytics.js\"></script></head><body>home</body></html>"
+    },
+    "105": {
+      "requestHeader": "GET /api/Products HTTP/1.1\r\nHost: shop.brakes-vapt.test:3000\r\nUser-Agent: ZAP\r\n\r\n",
+      "requestBody": "",
+      "responseHeader": "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nServer: Express/4.17.1\r\nX-Powered-By: Express\r\n\r\n",
+      "responseBody": "{\"status\":\"success\",\"data\":[]}"
+    },
+    "106": {
+      "requestHeader": "GET /track-result HTTP/1.1\r\nHost: shop.brakes-vapt.test:3000\r\nUser-Agent: ZAP\r\n\r\n",
+      "requestBody": "",
+      "responseHeader": "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
+      "responseBody": "<html><body><a href=\"/track?jsessionid=SYNTHETICSESSIONVALUE1\">continue</a></body></html>"
+    },
+    "107": {
+      "requestHeader": "GET /contact-page HTTP/1.1\r\nHost: shop.brakes-vapt.test:3000\r\nUser-Agent: ZAP\r\n\r\n",
+      "requestBody": "",
+      "responseHeader": "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
+      "responseBody": "<html><body>contact us</body></html>"
+    },
+    "108": {
+      "requestHeader": "GET /contact HTTP/1.1\r\nHost: shop.brakes-vapt.test:3000\r\nUser-Agent: ZAP\r\n\r\n",
+      "requestBody": "",
+      "responseHeader": "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
+      "responseBody": "<html><body><form method=\"post\" action=\"/contact\"><input type=\"text\" name=\"comment\"><button>Send</button></form></body></html>"
     }
   }
 }

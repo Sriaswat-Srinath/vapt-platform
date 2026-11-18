@@ -4,7 +4,7 @@ Guards against the realistic failure mode: not someone deleting a safety test,
 but a safety test quietly staying skipped while the milestone it guards ships.
 """
 from __future__ import annotations
-import pathlib, re, pytest
+import re, pytest
 from invariant_registry import INVARIANTS, landed_milestones, HERE
 
 EXPECTED = [f"I{i}" for i in range(1, 15)]
@@ -54,6 +54,6 @@ def test_milestone_state_is_committed_and_sane():
         assert re.fullmatch(r"(M[\d.]+|P\d+)", m), m
     # Phases not yet delivered must not be marked landed.
     # P7 (dashboard + reports) was delivered before P6 (agent) at the owner's
-    # direction, so the set is not contiguous. Only genuinely undelivered
-    # phases must be absent.
-    assert "P8" not in landed
+    # direction, so the set is not contiguous. M9+ (the first genuine passive
+    # assessment) has NOT landed: no live scan has ever run.
+    assert "M9" not in landed and "M10" not in landed

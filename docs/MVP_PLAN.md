@@ -66,7 +66,15 @@ separately in phase 5.
 Tests · security-boundary verification (`net_verify` + `lab-check` + invariants) · regression ·
 documentation · an acceptance report. Simulated functionality is never reported as implemented.
 
-## 5. OPEN QUESTION for the owner — host hygiene and the scan gate
+## 5. RESOLVED (phase 8) — host hygiene and the scan gate
+
+> **Decision, 2026-11-18:** gate 2 requires BOTH `isolation_passed` and
+> `host_hygiene_passed`, kept as separate verdicts so a denial names which half failed.
+> A `null` hygiene verdict is a denial. Recorded in
+> [ADR-0015](adr/ADR-0015-gate2-requires-host-hygiene.md); the gate was not weakened to make
+> preflight pass. The original question is kept below for context.
+
+## 5a. The original open question — host hygiene and the scan gate
 
 `PUB-2` found a host listener on `0.0.0.0:5433` belonging to **`corelayer-lab-db`, an unrelated
 project on this machine**. Lab containers can reach it through the lab gateway (D20/B10). It is not

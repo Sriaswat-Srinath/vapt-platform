@@ -16,7 +16,7 @@ Nothing here consults an LLM, and the agent cannot reach this module.
 from __future__ import annotations
 import dataclasses as dc
 
-RULES_VERSION = "1.1.0"
+RULES_VERSION = "1.2.0"
 
 CANDIDATE = "candidate"
 CONFIRMED = "confirmed"
@@ -56,6 +56,11 @@ class ValidationInputs:
     cookie_attributes_present: tuple[str, ...] = ()
     cookie_attribute_claimed_missing: str | None = None
     transport_is_cleartext: bool = False
+    # Whether the claim is about a BROWSER POLICY header (CSP, X-Frame-Options,
+    # …), which only applies to a response a browser renders. A claim about a
+    # header that applies everywhere — a leaked `Server` version, say — must
+    # NOT be dismissed as not-applicable just because the endpoint returns JSON.
+    claim_is_browser_policy: bool = True
 
 
 @dc.dataclass(frozen=True, slots=True)
@@ -88,7 +93,7 @@ def _rule_missing_header(i: ValidationInputs) -> ValidationOutcome:
         return ValidationOutcome(CANDIDATE, rid, RULES_VERSION,
                                  "no stored response evidence yet: the evidence gap is recorded",
                                  base)
-    if not _browser_reachable(i):
+    if i.claim_is_browser_policy and not _browser_reachable(i):
         return ValidationOutcome(NOT_APPLICABLE, rid, RULES_VERSION,
                                  "the endpoint is not browser-reachable HTML, so a browser "
                                  "security header does not apply", base)
@@ -117,9 +122,10 @@ def _rule_header_value(i: ValidationInputs) -> ValidationOutcome:
     base = _inputs_dict(i)
     if not i.has_response_evidence:
         return ValidationOutcome(CANDIDATE, rid, RULES_VERSION, "no stored response evidence", base)
-    if not _browser_reachable(i):
+    if i.claim_is_browser_policy and not _browser_reachable(i):
         return ValidationOutcome(NOT_APPLICABLE, rid, RULES_VERSION,
-                                 "not browser-reachable HTML", base)
+                                 "not browser-reachable HTML, and this is a browser-policy "
+                                 "header claim", base)
     if i.scanner_evidence:
         return ValidationOutcome(CONFIRMED, rid, RULES_VERSION,
                                  f"the directive {i.scanner_evidence!r} is present in the stored "

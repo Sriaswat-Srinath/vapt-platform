@@ -155,5 +155,32 @@ test-agent:                  ## one agent run with LLM_ENABLED=true against the 
 	  docker compose -f docker-compose.yml up -d --force-recreate api >/dev/null; \
 	  echo "LLM_ENABLED restored to its default (false)"; exit $$status
 
+detection-eval:              ## evaluate the engine against the detection dataset
+	@./scripts/detection_eval.py --json .lab-state/detection-eval.json \
+	  --md docs/DETECTION_EVALUATION.md
+
+lint:                        ## ruff over backend, tests and scripts
+	@python3 -m ruff check .
+
+typecheck:                   ## mypy over the backend application
+	@python3 -m mypy
+
+format-check:                ## report formatting drift without rewriting anything
+	@python3 -m ruff format --check . || true
+
+ci-local:                    ## what CI runs, locally: lint, types, invariants, code-only tests
+	@python3 -m ruff check . && python3 -m mypy && \
+	  python3 -m pytest backend/tests/invariants -q && \
+	  python3 -m pytest tests/backend/test_taxonomy_coverage.py -q -k "not api and not endpoint"
+
+test-retention:              ## I12: purge idempotence and halting, with real blobs
+	@# Turns RETENTION_ENABLED on for the run and off again afterwards. The
+	@# synthetic blobs this creates are removed by the test's own fixture.
+	@RETENTION_ENABLED=true docker compose -f docker-compose.yml up -d --force-recreate api >/dev/null
+	@sleep 9
+	@python3 -m pytest tests/backend/test_phase8_hardening.py -q -k "i12 or retention"; status=$$?; \
+	  docker compose -f docker-compose.yml up -d --force-recreate api >/dev/null; \
+	  echo "RETENTION_ENABLED restored to its default (false)"; exit $$status
+
 isolation-report:            ## run lab-check and report the result to the API (admin)
 	@./scripts/report_isolation.sh

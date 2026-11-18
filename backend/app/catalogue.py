@@ -9,10 +9,11 @@ This is the ONLY default source of CVSS (ADR-0004). An LLM never writes here.
 Vectors and scores are the published CVSS v3.1 values for these classes.
 """
 from __future__ import annotations
+from typing import Any
 
 CATALOGUE_VERSION = "1.1.0"
 
-CATALOGUE = [
+CATALOGUE: list[dict[str, Any]] = [
     dict(key="missing-security-header-csp", title="Content-Security-Policy header not set",
          category="security_misconfiguration", cwe_ids=["CWE-693"], default_severity="medium",
          cvss_version="3.1", cvss_vector="CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:C/C:L/I:L/A:N",

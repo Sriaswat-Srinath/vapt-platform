@@ -295,7 +295,7 @@ def render_html(*, asset: dict, sections: list[dict], meta: dict) -> bytes:
 def render_pdf(html_bytes: bytes) -> tuple[bytes | None, str | None]:
     """Returns (pdf_bytes, unavailable_reason). Never raises."""
     try:
-        from weasyprint import HTML  # type: ignore
+        from weasyprint import HTML
     except Exception as exc:                              # noqa: BLE001
         return None, (f"PDF rendering is unavailable in this image "
                       f"({type(exc).__name__}: {exc}). HTML and JSON are unaffected.")
