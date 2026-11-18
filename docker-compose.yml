@@ -1,7 +1,7 @@
 # VAPT application stack — M1.5 TOPOLOGY VERIFICATION.
 #
-# postgres and redis are REAL, digest-pinned services (MVP phase 1). frontend,
-# api and worker are still PLACEHOLDERS (lab/placeholders/listen.py): they hold a
+# postgres, redis and the api are REAL services (MVP phases 1-2). frontend and
+# worker are still PLACEHOLDERS (lab/placeholders/listen.py): they hold a
 # container open on an explicit address so topology stays measurable until the
 # application exists. No endpoints, no migrations, no authentication, no scanner
 # adapter yet. Replacing a placeholder must preserve every NET-* property —
@@ -76,22 +76,66 @@ services:
       vapt_edge:
         ipv4_address: 172.30.20.10
 
-  # TODO(MVP phase 2): replace with the real FastAPI service, same networks,
-  # same edge-only HTTP bind. NET-G5/NET-J8 must stay green.
   api:
-    <<: *placeholder
+    # REAL FastAPI service (MVP phase 2). Internal networks only: no internet
+    # route. Its HTTP listener binds the vapt_edge address ONLY, so neither the
+    # worker (vapt_core) nor the egress proxy (vapt_egress) can reach it —
+    # NET-G5 / NET-J8 must stay green.
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: vapt-api:dev
     container_name: vapt_api
     hostname: api
-    # The HTTP listener binds the vapt_edge address ONLY, so nothing on
-    # vapt_core (the worker) or vapt_egress (the proxy) can reach it.
+    restart: "no"
+    init: true
+    read_only: true
+    user: "65532:65532"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 768m
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
     environment:
-      SERVICE_NAME: api
-      BIND_SPEC: "172.30.20.20:8000"
+      APP_ENV: ${APP_ENV:-dev}
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set}
+      API_BIND_IP: 172.30.20.20
+      API_PORT: "8000"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-vapt}:${POSTGRES_PASSWORD:?}@172.30.21.40:5432/${POSTGRES_DB:-vapt}
+      REDIS_URL: redis://172.30.21.50:6379/0
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?}
+      # Standing safety posture — all false. Enabling any of these is a
+      # deliberate, separately authorised act.
+      SCANNER_EXECUTION_ENABLED: ${SCANNER_EXECUTION_ENABLED:-false}
+      ZAP_ADAPTER_ENABLED: ${ZAP_ADAPTER_ENABLED:-false}
+      ACTIVE_SCAN_ENABLED: ${ACTIVE_SCAN_ENABLED:-false}
+      DUAL_CONTROL_AVAILABLE: ${DUAL_CONTROL_AVAILABLE:-false}
+      DEFAULT_SCANNER_ADAPTER: ${DEFAULT_SCANNER_ADAPTER:-mock}
+      LAB_SUBNET: ${LAB_SUBNET:-172.30.10.0/24}
+      LLM_ENABLED: "false"
+      # No egress of its own: outbound exists only via the proxy (phase 5).
       HTTPS_PROXY: "http://172.30.22.60:3128"
       HTTP_PROXY: "http://172.30.22.60:3128"
-      LLM_ENABLED: "false"
-      LLM_PROVIDER_HOST: "llm-standin"
-      LLM_PROVIDER_PORT: "8443"
+      # Internal hops must NOT go through the egress proxy (it would refuse
+      # them, correctly). Only outbound traffic to the configured provider is
+      # proxied. urllib/requests honour no_proxy as exact hosts, not CIDRs.
+      NO_PROXY: "localhost,127.0.0.1,172.30.20.20,172.30.21.20,172.30.21.40,172.30.21.50,postgres,redis,api,frontend"
+      no_proxy: "localhost,127.0.0.1,172.30.20.20,172.30.21.20,172.30.21.40,172.30.21.50,postgres,redis,api,frontend"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import http.client,sys; c=http.client.HTTPConnection('172.30.20.20',8000,timeout=3); c.request('GET','/api/v1/system/health'); sys.exit(0 if c.getresponse().status==200 else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
     networks:
       vapt_edge:
         ipv4_address: 172.30.20.20

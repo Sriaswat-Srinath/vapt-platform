@@ -85,3 +85,32 @@ net-prove-failure:           ## prove net_verify FAILS under induced egress, the
 
 test-net:                    ## pytest wrappers over the network probes
 	@python3 -m pytest tests/net -v
+
+api-up:                      ## build + start the real API (phase 2)
+	@docker compose -f docker-compose.yml up -d --build api
+	@for i in $$(seq 1 24); do \
+	  [ "$$(docker inspect vapt_api --format '{{.State.Health.Status}}')" = healthy ] && { echo "api healthy"; exit 0; }; sleep 5; done; \
+	echo "api did not become healthy"; exit 1
+
+db-migrate:                  ## run alembic migrations
+	@set -a; . ./.env; set +a; docker run --rm --network vapt_core \
+	  -e DATABASE_URL="postgresql+psycopg://$$POSTGRES_USER:$$POSTGRES_PASSWORD@172.30.21.40:5432/$$POSTGRES_DB" \
+	  -e SECRET_KEY="$$SECRET_KEY" vapt-api:dev alembic upgrade head
+
+db-seed:                     ## seed accounts, profiles and MOCK-WEB-001 (no grant, no signature)
+	@set -a; . ./.env; set +a; docker run --rm --network vapt_core \
+	  -e DATABASE_URL="postgresql+psycopg://$$POSTGRES_USER:$$POSTGRES_PASSWORD@172.30.21.40:5432/$$POSTGRES_DB" \
+	  -e SECRET_KEY="$$SECRET_KEY" vapt-api:dev python -m app.seed
+
+api-publish:                 ## OPT-IN loopback forwarder 127.0.0.1:8000 -> api (deviation D19)
+	@if [ -f .lab-state/publish-api.pid ] && kill -0 $$(cat .lab-state/publish-api.pid) 2>/dev/null; then \
+	  echo "already running (pid $$(cat .lab-state/publish-api.pid))"; else \
+	  nohup ./scripts/app_publish.py api >> .lab-state/publish-api.log 2>&1 & \
+	  sleep 1; echo "$$(tail -n1 .lab-state/publish-api.log)"; fi
+
+api-unpublish:               ## stop the api forwarder
+	@if [ -f .lab-state/publish-api.pid ]; then kill $$(cat .lab-state/publish-api.pid) 2>/dev/null; \
+	  rm -f .lab-state/publish-api.pid; echo "stopped"; else echo "not running"; fi
+
+isolation-report:            ## run lab-check and report the result to the API (admin)
+	@./scripts/report_isolation.sh

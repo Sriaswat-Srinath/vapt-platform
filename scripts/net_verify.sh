@@ -104,20 +104,40 @@ for spec in "vapt_frontend:vapt_edge" "vapt_api:vapt_core,vapt_edge,vapt_egress"
   got=$(docker inspect "$c" --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}},{{end}}' 2>/dev/null | tr ',' '\n' | grep -v '^$' | sort | paste -sd, -)
   add "NET-A:${c#vapt_}" "$want" "${got:-<none>}" "$(eq "$got" "$want")" "exact network attachment set"
 done
-# image digest pinned in compose AND running image matches
+# Image provenance. Two rules, because they are different situations:
+#   third-party images  -> MUST be referenced by digest in compose, and the
+#                          running container MUST match that digest.
+#   first-party images  -> built from this repo, so there is no registry digest.
+#                          Their Dockerfile's FROM MUST be digest-pinned, and the
+#                          running container MUST match the locally built image id
+#                          (no floating tag drift).
+FIRST_PARTY="vapt_api"
 for c in vapt_frontend vapt_api vapt_worker vapt_postgres vapt_redis vapt_egress_proxy vapt_llm_standin; do
   pinned=$(printf '%s' "$cfg" | python3 -c "
 import json,sys
 c=json.load(sys.stdin)
 for n,s in c['services'].items():
     if s.get('container_name')=='$c': print(s['image']); break" 2>/dev/null)
-  case "$pinned" in *@sha256:*) pin_ok=true;; *) pin_ok=false;; esac
-  add "NET-B:${c#vapt_}:pinned" true "$pin_ok" "$pin_ok" "compose image: ${pinned:-<none>}"
-  want="${pinned##*@}"
   imgid=$(docker inspect "$c" --format '{{.Image}}' 2>/dev/null)
-  rd=$(docker image inspect "$imgid" --format '{{json .RepoDigests}}' 2>/dev/null)
-  case "$rd" in *"$want"*) run_ok=true;; *) run_ok=false;; esac
-  add "NET-B:${c#vapt_}:running" true "$run_ok" "$run_ok" "running image digest matches the pin"
+  case " $FIRST_PARTY " in
+    *" $c "*)
+      # FROM must be digest-pinned
+      base_ok=$(grep -cE '^FROM .*@sha256:[0-9a-f]{64}' backend/Dockerfile 2>/dev/null || true)
+      add "NET-B:${c#vapt_}:base-pinned" 1 "${base_ok:-0}" "$(eq "${base_ok:-0}" 1)" \
+          "first-party image: Dockerfile FROM is digest-pinned"
+      tagid=$(docker image inspect "$pinned" --format '{{.Id}}' 2>/dev/null)
+      add "NET-B:${c#vapt_}:running" "$tagid" "$imgid" "$(eq "$imgid" "$tagid")" \
+          "running container matches the locally built image id (image ref: ${pinned:-<none>})"
+      ;;
+    *)
+      case "$pinned" in *@sha256:*) pin_ok=true;; *) pin_ok=false;; esac
+      add "NET-B:${c#vapt_}:pinned" true "$pin_ok" "$pin_ok" "compose image: ${pinned:-<none>}"
+      want="${pinned##*@}"
+      rd=$(docker image inspect "$imgid" --format '{{json .RepoDigests}}' 2>/dev/null)
+      case "$rd" in *"$want"*) run_ok=true;; *) run_ok=false;; esac
+      add "NET-B:${c#vapt_}:running" true "$run_ok" "$run_ok" "running image digest matches the pin"
+      ;;
+  esac
 done
 # environment hygiene
 for c in vapt_worker vapt_frontend; do
