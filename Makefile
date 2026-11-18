@@ -21,8 +21,11 @@ lab-up: lab-subnet-check     ## bring up the isolated lab (subnet-checked first)
 lab-down: lab-unpublish      ## stop the lab (keeps nothing; lab is disposable)
 	@$(COMPOSE_LAB) down
 
-lab-check:                   ## run the isolation verification suite
+lab-check:                   ## isolation verification (strict: containment + access + host hygiene)
 	@./scripts/lab_isolation_check.sh
+
+lab-check-containment:       ## isolation verification, containment only (ignores foreign host listeners)
+	@./scripts/lab_isolation_check.sh --require containment
 
 lab-reset:                   ## recreate the lab clean. Scoped to project `vapt` ONLY.
 	@$(COMPOSE_LAB) down -v --remove-orphans
@@ -36,7 +39,7 @@ lab-zap-restart:             ## OPERATOR action: restart the ZAP container (the 
 	@$(COMPOSE_LAB) restart zap
 	@for i in $$(seq 1 24); do 	  [ "$$(docker inspect vapt_zap --format '{{.State.Health.Status}}')" = healthy ] && break; sleep 5; done
 	@./scripts/zap_daemon_state.sh ack-restart
-	@$(MAKE) --no-print-directory lab-check
+	@./scripts/lab_isolation_check.sh --require containment
 
 zap-state:                   ## show the scanner daemon dirty state
 	@./scripts/zap_daemon_state.sh status

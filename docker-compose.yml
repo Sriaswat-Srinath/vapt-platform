@@ -1,10 +1,11 @@
 # VAPT application stack — M1.5 TOPOLOGY VERIFICATION.
 #
-# Every service here is a PLACEHOLDER (see lab/placeholders/listen.py): it holds
-# a container open and listens on an explicit address so the network topology can
-# be measured before any application code exists. There are no endpoints, no
-# migrations, no authentication, no scanner adapter. M2 replaces these with the
-# real services on exactly these networks.
+# postgres and redis are REAL, digest-pinned services (MVP phase 1). frontend,
+# api and worker are still PLACEHOLDERS (lab/placeholders/listen.py): they hold a
+# container open on an explicit address so topology stays measurable until the
+# application exists. No endpoints, no migrations, no authentication, no scanner
+# adapter yet. Replacing a placeholder must preserve every NET-* property —
+# `make net-verify` is re-run as acceptance (M2-N1, M2-N6).
 #
 # Topology (docs/NETWORK_ARCHITECTURE.md, ADR-0012):
 #   vapt_edge    internal  frontend + api        (the api's HTTP listener binds HERE ONLY)
@@ -75,6 +76,8 @@ services:
       vapt_edge:
         ipv4_address: 172.30.20.10
 
+  # TODO(MVP phase 2): replace with the real FastAPI service, same networks,
+  # same edge-only HTTP bind. NET-G5/NET-J8 must stay green.
   api:
     <<: *placeholder
     container_name: vapt_api
@@ -111,24 +114,97 @@ services:
         ipv4_address: 172.30.21.30
 
   postgres:
-    <<: *placeholder
+    # REAL service (MVP phase 1) — digest-pinned. vapt_core only: no egress path.
+    image: postgres@sha256:1d04b9ba1d4996401f2552b51beda8187f175c0645c091e4781134fc9c9a3eef
     container_name: vapt_postgres
     hostname: postgres
-    # Placeholder listener only — no database in M1.5 (no migrations, no data).
+    restart: "no"
+    init: true
+    user: "70:70"                      # postgres uid/gid in the alpine image
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 1g
     environment:
-      SERVICE_NAME: postgres-placeholder
-      BIND_SPEC: "172.30.21.40:5432"
+      POSTGRES_DB: ${POSTGRES_DB:-vapt}
+      POSTGRES_USER: ${POSTGRES_USER:-vapt}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
+      PGDATA: /var/lib/postgresql/data/pgdata
+    command:
+      - postgres
+      - -c
+      - listen_addresses=172.30.21.40   # core interface only, never 0.0.0.0
+      - -c
+      - password_encryption=scram-sha-256
+      - -c
+      - log_connections=on
+      - -c
+      - log_disconnections=on
+    volumes:
+      - vapt_pgdata:/var/lib/postgresql/data
+    tmpfs:
+      - /tmp:rw,nosuid,size=64m
+      - /run/postgresql:rw,nosuid,size=16m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 172.30.21.40 -U ${POSTGRES_USER:-vapt} -d ${POSTGRES_DB:-vapt}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
     networks:
       vapt_core:
         ipv4_address: 172.30.21.40
 
   redis:
-    <<: *placeholder
+    # REAL service (MVP phase 1) — digest-pinned. vapt_core only: no egress path.
+    image: redis@sha256:c1e88455c85225310bbea54816e9c3f4b5295815e6dbf80c34d40afc6df28275
     container_name: vapt_redis
     hostname: redis
+    restart: "no"
+    init: true
+    user: "999:1000"                   # redis uid/gid in the alpine image
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 512m
+    command:
+      - redis-server
+      - --bind
+      - 172.30.21.50                   # core interface only, never 0.0.0.0
+      - --port
+      - "6379"
+      - --requirepass
+      - ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+      - --maxmemory
+      - 256mb
+      - --maxmemory-policy
+      - noeviction
+    tmpfs:
+      - /data:rw,nosuid,size=64m
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -h 172.30.21.50 -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
     environment:
-      SERVICE_NAME: redis-placeholder
-      BIND_SPEC: "172.30.21.50:6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
     networks:
       vapt_core:
         ipv4_address: 172.30.21.50
@@ -145,6 +221,13 @@ services:
       PROXY_BIND_IP: "172.30.22.60"          # egress interface only, never 0.0.0.0
       PROXY_PORT: "3128"
       EGRESS_ALLOWLIST: "${EGRESS_ALLOWLIST:-llm-standin:8443}"
+      # Defence in depth: only the api's egress address may use the proxy. The
+      # worker and frontend already cannot reach this port (NET-G3 / NET-I3);
+      # the proxy refuses them regardless of network state.
+      ALLOWED_CLIENT_CIDRS: "${ALLOWED_CLIENT_CIDRS:-172.30.22.20/32}"
+      PROXY_MAX_CONCURRENT_TUNNELS: "${PROXY_MAX_CONCURRENT_TUNNELS:-16}"
+      PROXY_MAX_TUNNEL_SECONDS: "${PROXY_MAX_TUNNEL_SECONDS:-900}"
+      PROXY_MAX_TUNNEL_BYTES: "${PROXY_MAX_TUNNEL_BYTES:-67108864}"
       INTERNAL_DENY_CIDRS: "172.30.20.0/24,172.30.21.0/24,172.30.22.0/24,172.30.10.0/24"
     networks:
       vapt_egress:
@@ -167,3 +250,7 @@ services:
     networks:
       vapt_wan:
         ipv4_address: 172.30.23.70
+
+volumes:
+  vapt_pgdata:
+    name: vapt_pgdata

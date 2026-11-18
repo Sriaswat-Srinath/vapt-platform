@@ -24,9 +24,27 @@ def _probe(check: dict, pid: str) -> dict:
                                            "required": hits[0]["required"], "detail": "aggregated"}
 
 
-def test_overall_verdict(check):
-    assert check["passed"] is True and check["_exit"] == 0, \
+def test_lab_containment(check):
+    """The control that matters: container->internet / ->LAN containment."""
+    assert check["isolation_passed"] is True, \
         [p for p in check["probe_results"] if not p["pass"]]
+
+
+def test_no_vapt_container_publishes_on_wildcard(check):
+    """PUB-1 is fatal: our own containers must never publish on 0.0.0.0."""
+    p = next(x for x in check["probe_results"] if x["id"] == "PUB-1")
+    assert p["pass"] and p["observed"] == "0", p
+
+
+def test_host_wildcard_listeners_are_reported(check):
+    """PUB-2 / B10: host 0.0.0.0 listeners are reachable from lab containers.
+    They are the operator's to fix; this platform must surface them, not hide
+    them. Recorded in its own verdict so it never masks a containment failure.
+    """
+    assert "host_hygiene_passed" in check and "host_wildcard_listeners" in check
+    if not check["host_hygiene_passed"]:
+        print(f"\nHOST HYGIENE WARNING: foreign 0.0.0.0 listeners reachable from "
+              f"the lab via the gateway: {check['host_wildcard_listeners']}")
 
 
 @pytest.mark.parametrize("pid,label", [

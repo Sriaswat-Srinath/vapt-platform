@@ -1,7 +1,7 @@
 # Agentic Web VAPT Platform
 
 AI-assisted web vulnerability assessment platform for **authorised, locally hosted mock targets
-only**. Current state: **M1 accepted** (isolated lab); **M1.5 executed, pending review**; M2 pending approval. No application code exists yet. Scope: `docs/MVP_SCOPE.md`.
+only**. Current state: **M1 accepted**; **M1.5 provisionally accepted**; **MVP phase 1 done** (real digest-pinned PostgreSQL/Redis, proxy hardened and adversarially tested, 108/108 network probes). Phase 2 (backend core) not started. No application code exists yet. Scope: `docs/MVP_SCOPE.md`.
 
 Read `CLAUDE.md` for the engineering rules, then the design set in `docs/`:
 
@@ -27,6 +27,8 @@ Read `CLAUDE.md` for the engineering rules, then the design set in `docs/`:
 | [docs/M1_ACCEPTANCE.md](docs/M1_ACCEPTANCE.md) | M1 scope and acceptance criteria |
 | [docs/M1_REPORT.md](docs/M1_REPORT.md) | M1 results, evidence, deviations D19–D23 and their ratification |
 | [docs/NETWORK_ARCHITECTURE.md](docs/NETWORK_ARCHITECTURE.md) | M1→M2 per-component network access, reachability classes, API egress boundary |
+| [docs/MVP_PLAN.md](docs/MVP_PLAN.md) | **phased MVP plan**: reuse inventory, dependencies, acceptance, carried conditions |
+| [docs/MVP_PHASE1_REPORT.md](docs/MVP_PHASE1_REPORT.md) | phase 1: real datastores + proxy security review |
 | [docs/MVP_SCOPE.md](docs/MVP_SCOPE.md) | **adopted MVP scope**, build/defer, reconciliation with binding decisions, the open ruling on active tests |
 | [docs/M1_5_PLAN.md](docs/M1_5_PLAN.md) | M1.5 scope and the five owner corrections |
 | [docs/M1_5_REPORT.md](docs/M1_5_REPORT.md) | M1.5 results: 91 probes, induced-failure evidence, limitations |

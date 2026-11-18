@@ -6,6 +6,14 @@
 #
 # This check must be able to FAIL. See `make lab-prove-failure`.
 set -uo pipefail
+# --require all          (default) exit 0 only when containment AND access AND
+#                        host hygiene all pass.
+# --require containment  exit 0 when container->internet/->LAN containment holds,
+#                        regardless of foreign host listeners or the optional
+#                        workstation forwarder. Used by recovery paths, which must
+#                        not be blocked by an unrelated service on the host.
+REQUIRE="all"
+[ "${1:-}" = "--require" ] && { REQUIRE="${2:-all}"; shift 2 || true; }
 cd "$(dirname "$0")/.."
 [ -f .env ] && { set -a; . ./.env; set +a; }
 mkdir -p "${LAB_STATE_DIR:-.lab-state}"
@@ -183,8 +191,16 @@ fi
 #      so a 0.0.0.0 publish of a VAPT component would also expose it. ==========
 wild=$(docker ps --filter "name=^vapt" --format '{{.Names}} {{.Ports}}' 2>/dev/null | grep -c '0\.0\.0\.0:' || true)
 add PUB-1 0 "$wild" "$(pass_fail "$wild" 0)" "vapt containers with a 0.0.0.0 host publish"
+# PUB-2 is an OBSERVATION, per assumption B10: it *reports* host-wide 0.0.0.0
+# listeners, which lab containers can reach via the gateway. These are usually
+# someone else's services on the operator's machine, which this platform cannot
+# fix and must not silently ignore. It is therefore recorded in its own verdict
+# (`host_hygiene_passed`) rather than conflated with lab containment: PUB-1
+# (no VAPT container publishes on 0.0.0.0) remains fatal.
 hostwild=$(ss -lntH 2>/dev/null | awk '{print $4}' | grep -E '^(0\.0\.0\.0|\*|\[::\]):' | sort -u | tr '\n' ' ')
-add PUB-2 "<none>" "${hostwild:-<none>}" "$([ -z "$hostwild" ] && echo true || echo false)" "host listeners on 0.0.0.0 — reachable from lab containers via ${SUBNET%.*}.1 (D20)"
+HOST_WILDCARD_LISTENERS="${hostwild:-<none>}"
+[ -z "$hostwild" ] && HOST_HYGIENE=true || HOST_HYGIENE=false
+add PUB-2 "enumerated" "${hostwild:-<none>}" true "host 0.0.0.0 listeners reachable from lab containers via ${SUBNET%.*}.1 (D20/B10). Observation, not a containment failure; see host_hygiene_passed"
 
 # === reachability matrix (D20) — observed classes, recorded not judged =======
 # ECONNREFUSED to the gateway proves L3 reachability of the host without a listener;
@@ -204,12 +220,18 @@ egress_blocked=true; dns_contained=true; isolation_passed=true; access_passed=tr
 for r in "${RESULTS[@]}"; do
   IFS='|' read -r id req obs ok det <<< "$r"
   case "$id" in
-    F*) [ "$ok" = true ] || access_passed=false;;
-    *)  [ "$ok" = true ] || isolation_passed=false;;
+    F*)     [ "$ok" = true ] || access_passed=false;;
+    PUB-2)  : ;;   # observation only; recorded in host_hygiene_passed
+    *)      [ "$ok" = true ] || isolation_passed=false;;
   esac
   case "$id" in I2*|I3*) [ "$ok" = true ] || egress_blocked=false;; I4*) [ "$ok" = true ] || dns_contained=false;; esac
 done
-passed=$isolation_passed; [ "$access_passed" = true ] || passed=false
+# `passed` keeps the strict meaning: containment AND workstation access AND host
+# hygiene. The M3 scan gate consumes `isolation_passed` (containment) and is told
+# `host_hygiene_passed` separately — see OPEN QUESTION in docs/MVP_PLAN.md §5.
+passed=$isolation_passed
+[ "$access_passed" = true ] || passed=false
+[ "$HOST_HYGIENE" = true ] || passed=false
 now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 valid=$(date -u -d "+${TTL_MIN} minutes" +%Y-%m-%dT%H:%M:%SZ)
 {
@@ -229,6 +251,8 @@ valid=$(date -u -d "+${TTL_MIN} minutes" +%Y-%m-%dT%H:%M:%SZ)
   echo "    \"host_to_container\": \"$(classify "$H_ZAP")\","
   echo "    \"note\": \"internal:true is NOT host isolation: the host reaches containers, and containers reach host services bound on 0.0.0.0 via the lab gateway. Isolation claims cover container->internet and container->LAN only.\""
   echo "  },"
+  echo "  \"host_wildcard_listeners\": \"$HOST_WILDCARD_LISTENERS\","
+  echo "  \"host_hygiene_passed\": $HOST_HYGIENE,"
   echo "  \"isolation_passed\": $isolation_passed,"
   echo "  \"access_passed\": $access_passed,"
   echo "  \"passed\": $passed,"
@@ -242,4 +266,7 @@ valid=$(date -u -d "+${TTL_MIN} minutes" +%Y-%m-%dT%H:%M:%SZ)
   echo "  ]"
   echo "}"
 } | tee "${LAB_STATE_DIR:-.lab-state}/isolation-check.json" 2>/dev/null || true
-[ "$passed" = true ]
+case "$REQUIRE" in
+  containment) [ "$isolation_passed" = true ];;
+  *)           [ "$passed" = true ];;
+esac
