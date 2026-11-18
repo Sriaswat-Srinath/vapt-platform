@@ -5,6 +5,15 @@ FROM python@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc0
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 WORKDIR /srv
 
+# WeasyPrint needs Pango/Cairo at runtime. PDF output is optional by design
+# (decision D5): if these are absent the renderer records the artifact as
+# unavailable and HTML/JSON are unaffected.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libfontconfig1 \
+      libcairo2 libgdk-pixbuf-2.0-0 fonts-dejavu-core \
+ && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt /srv/requirements.txt
 RUN pip install --no-cache-dir -r /srv/requirements.txt
 

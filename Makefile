@@ -132,5 +132,19 @@ api-unpublish:               ## stop the api forwarder
 	@if [ -f .lab-state/publish-api.pid ]; then kill $$(cat .lab-state/publish-api.pid) 2>/dev/null; \
 	  rm -f .lab-state/publish-api.pid; echo "stopped"; else echo "not running"; fi
 
+frontend-up:                 ## build + start the analyst dashboard (phase 7)
+	@docker compose -f docker-compose.yml up -d --build frontend
+	@sleep 2; docker compose -f docker-compose.yml ps --format '{{.Name}} {{.State}}' | grep frontend
+
+frontend-publish:            ## OPT-IN loopback forwarder 127.0.0.1:5173 -> dashboard (deviation D19)
+	@if [ -f .lab-state/publish-frontend.pid ] && kill -0 $$(cat .lab-state/publish-frontend.pid) 2>/dev/null; then \
+	  echo "already running (pid $$(cat .lab-state/publish-frontend.pid))"; else \
+	  nohup ./scripts/app_publish.py frontend >> .lab-state/publish-frontend.log 2>&1 & \
+	  sleep 1; echo "$$(tail -n1 .lab-state/publish-frontend.log)"; fi
+
+frontend-unpublish:          ## stop the dashboard forwarder
+	@if [ -f .lab-state/publish-frontend.pid ]; then kill $$(cat .lab-state/publish-frontend.pid) 2>/dev/null; \
+	  rm -f .lab-state/publish-frontend.pid; echo "stopped"; else echo "not running"; fi
+
 isolation-report:            ## run lab-check and report the result to the API (admin)
 	@./scripts/report_isolation.sh

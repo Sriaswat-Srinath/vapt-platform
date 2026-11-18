@@ -71,12 +71,37 @@ x-placeholder: &placeholder
 
 services:
   frontend:
-    <<: *placeholder
+    # REAL analyst dashboard (MVP phase 7). A static bundle served by nginx:
+    # there is no node runtime in the served image, no credential in its
+    # environment and no network but vapt_edge. nginx proxies /api to the api's
+    # edge address, so the browser talks to exactly one origin and the api's
+    # edge-only binding is preserved. NET-I* must stay green.
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: vapt-frontend:dev
     container_name: vapt_frontend
     hostname: frontend
+    restart: "no"
+    init: true
+    read_only: true
+    user: "101:101"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 192m
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+      # uid/gid are required: a tmpfs is root-owned by default and nginx runs
+      # unprivileged here.
+      - /var/cache/nginx:rw,nosuid,size=16m,uid=101,gid=101
+      - /var/run:rw,noexec,nosuid,size=4m,uid=101,gid=101
     environment:
       SERVICE_NAME: frontend
-      BIND_SPEC: "172.30.20.10:8080"
+      # Documents the posture and grants nothing (NET-C).
+      LLM_ENABLED: "false"
     networks:
       vapt_edge:
         ipv4_address: 172.30.20.10
@@ -112,6 +137,9 @@ services:
       APP_ENV: ${APP_ENV:-dev}
       SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set}
       EVIDENCE_BLOB_ROOT: /var/lib/vapt/evidence
+      # WeasyPrint's font stack wants a writable cache; the root filesystem is
+      # read-only, so point it at the tmpfs.
+      XDG_CACHE_HOME: /tmp
       REDACTION_HMAC_KEY: ${REDACTION_HMAC_KEY:?REDACTION_HMAC_KEY must be set}
       REDACTION_KEY_ID: ${REDACTION_KEY_ID:-v1}
       API_BIND_IP: 172.30.20.20

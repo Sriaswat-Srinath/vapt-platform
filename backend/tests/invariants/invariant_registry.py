@@ -26,7 +26,7 @@ INVARIANTS: dict[str, tuple[str, str, str | None]] = {
     "I7":  ("No referenced evidence blob is purged",                     "P5",  "../../../tests/backend/test_findings_phase5.py"),
     "I8":  ("No new ZAP job starts while daemon state is dirty",         "P4",  "../../../tests/backend/test_scanner_phase4.py"),
     "I9":  ("No unsigned authorisation document activates a scope grant","P2",  "../../../tests/backend/test_backend_core.py"),
-    "I10": ("No report represents synthetic findings as real ones",      "P7", None),
+    "I10": ("No report represents synthetic findings as real ones",      "P7",  "../../../tests/backend/test_reports_phase7.py"),
     "I11": ("No plain hash of a secret value crosses the LLM boundary",  "P6",  None),
     "I12": ("Purge is idempotent and halts on inconsistency",            "P8",  None),
     "I13": ("Cancellation completes within the SLA",                     "P4",  "../../../tests/backend/test_scanner_phase4.py"),

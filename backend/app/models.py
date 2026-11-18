@@ -724,3 +724,58 @@ class RiskScore(Base):
     __table_args__ = (CheckConstraint("cvss_source is null or cvss_source in "
                                       "('catalogue','scanner_mapping','analyst')",
                                       name="ck_cvss_source"),)
+
+
+# --------------------------------------------------------------- reporting ----
+class Report(Base):
+    __tablename__ = "reports"
+    id: Mapped[Any] = _pk()
+    asset_id: Mapped[Any] = mapped_column(UUID(as_uuid=True), ForeignKey("assets.id"),
+                                          nullable=False)
+    state: Mapped[str] = mapped_column(String(12), default="draft", nullable=False)
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    scope_grant_id: Mapped[Any | None] = mapped_column(UUID(as_uuid=True),
+                                                       ForeignKey("scope_grants.id"))
+    job_ids: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+    discovery_run_ids: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+    template_key: Mapped[str] = mapped_column(String(60), nullable=False)
+    template_version: Mapped[str] = mapped_column(String(20), nullable=False)
+    filter: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    generated_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    generated_by: Mapped[Any | None] = mapped_column(UUID(as_uuid=True),
+                                                     ForeignKey("analysts.id"))
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[dt.datetime] = _now()
+    __table_args__ = (CheckConstraint("state in ('draft','generating','ready','failed')",
+                                      name="ck_report_state"),)
+
+
+class ReportSection(Base):
+    __tablename__ = "report_sections"
+    id: Mapped[Any] = _pk()
+    report_id: Mapped[Any] = mapped_column(UUID(as_uuid=True), ForeignKey("reports.id"),
+                                           nullable=False)
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    key: Mapped[str] = mapped_column(String(60), nullable=False)
+    heading: Mapped[str] = mapped_column(String(200), nullable=False)
+    body_md: Mapped[str | None] = mapped_column(Text)
+    data: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    __table_args__ = (UniqueConstraint("report_id", "key", name="uq_report_section"),)
+
+
+class ReportArtifact(Base):
+    __tablename__ = "report_artifacts"
+    id: Mapped[Any] = _pk()
+    report_id: Mapped[Any] = mapped_column(UUID(as_uuid=True), ForeignKey("reports.id"),
+                                           nullable=False)
+    format: Mapped[str] = mapped_column(String(8), nullable=False)
+    artifact_blob_id: Mapped[Any | None] = mapped_column(UUID(as_uuid=True),
+                                                         ForeignKey("evidence_blobs.id"))
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    unavailable_reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[dt.datetime] = _now()
+    __table_args__ = (
+        CheckConstraint("format in ('html','pdf','json','md')", name="ck_artifact_format"),
+        UniqueConstraint("report_id", "format", name="uq_report_artifact_format"),
+    )

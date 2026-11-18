@@ -53,4 +53,7 @@ def test_milestone_state_is_committed_and_sane():
     for m in landed:
         assert re.fullmatch(r"(M[\d.]+|P\d+)", m), m
     # Phases not yet delivered must not be marked landed.
-    assert "P6" not in landed and "P7" not in landed and "P8" not in landed
+    # P7 (dashboard + reports) was delivered before P6 (agent) at the owner's
+    # direction, so the set is not contiguous. Only genuinely undelivered
+    # phases must be absent.
+    assert "P6" not in landed and "P8" not in landed

@@ -81,6 +81,37 @@ except OSError as e:
     import errno; print({errno.ENETUNREACH:'ENETUNREACH',errno.ECONNREFUSED:'ECONNREFUSED',errno.EHOSTUNREACH:'EHOSTUNREACH',errno.ETIMEDOUT:'TIMEOUT'}.get(e.errno, e.__class__.__name__))
 finally: s.close()" 2>/dev/null || echo PROBE_ERROR
 }
+# TCP connect for images WITHOUT python3 (the dashboard is nginx-on-alpine).
+# busybox wget reports the connect failure in words, which maps 1:1 onto the
+# errno classes the python3 probe produces, so the dashboard's probes keep the
+# same precision as everything else. A reply of ANY kind (even an HTTP error, or
+# TLS answering a plaintext request) proves the connection was established.
+# NO_PROBE_TOOL remains a failure, never a pass.
+tcp_wget() { # $1 container  $2 host  $3 port
+  local out
+  out=$(docker exec "$1" sh -c "wget -T 4 -O /dev/null http://$2:$3/ 2>&1" 2>/dev/null) || true
+  # Classify EXPLICITLY in both directions. An unrecognised message is
+  # UNCLASSIFIED, which fails every probe that reads it: a classifier must never
+  # default to a verdict it did not actually observe.
+  case "$out" in
+    "")                                              echo PROBE_ERROR;;
+    *"Connection refused"*)                           echo ECONNREFUSED;;
+    *"Network unreachable"*|*"Network is unreachable"*) echo ENETUNREACH;;
+    *"Host is unreachable"*|*"No route to host"*|*"Host unreachable"*) echo EHOSTUNREACH;;
+    *"timed out"*|*"Connection timed out"*|*"Timed out"*) echo TIMEOUT;;
+    *"bad address"*|*"Bad address"*)                  echo EAI_NONAME;;
+    # Any HTTP-level outcome proves the TCP connection was established.
+    *"server returned error"*|*"saving to"*|*"written to"*|*"remote file exists"*|*"100%"*) echo REACHABLE;;
+    *)                                                echo UNCLASSIFIED;;
+  esac
+}
+tcp_any() { # $1 container  $2 host  $3 port
+  if have "$1" python3;   then tcp "$1" "$2" "$3"
+  elif have "$1" wget;    then tcp_wget "$1" "$2" "$3"
+  else echo NO_PROBE_TOOL; fi
+}
+reach() { case "$1" in REACHABLE) echo true;; *) echo false;; esac; }
+
 # HTTP request through the proxy from the api container; prints status|body-ish
 via_proxy() { # $1 raw request line  $2 extra
   docker exec vapt_api python3 -c "
@@ -111,7 +142,8 @@ done
 #                          Their Dockerfile's FROM MUST be digest-pinned, and the
 #                          running container MUST match the locally built image id
 #                          (no floating tag drift).
-FIRST_PARTY="vapt_api vapt_worker"
+FIRST_PARTY="vapt_api vapt_worker vapt_frontend"
+dockerfile_of() { case "$1" in vapt_frontend) echo frontend/Dockerfile;; *) echo backend/Dockerfile;; esac; }
 for c in vapt_frontend vapt_api vapt_worker vapt_postgres vapt_redis vapt_egress_proxy vapt_llm_standin; do
   pinned=$(printf '%s' "$cfg" | python3 -c "
 import json,sys
@@ -122,9 +154,12 @@ for n,s in c['services'].items():
   case " $FIRST_PARTY " in
     *" $c "*)
       # FROM must be digest-pinned
-      base_ok=$(grep -cE '^FROM .*@sha256:[0-9a-f]{64}' backend/Dockerfile 2>/dev/null || true)
-      add "NET-B:${c#vapt_}:base-pinned" 1 "${base_ok:-0}" "$(eq "${base_ok:-0}" 1)" \
-          "first-party image: Dockerfile FROM is digest-pinned"
+      df=$(dockerfile_of "$c")
+      from_n=$(grep -cE '^FROM ' "$df" 2>/dev/null || true)
+      base_ok=$(grep -cE '^FROM [^ ]+@sha256:[0-9a-f]{64}' "$df" 2>/dev/null || true)
+      add "NET-B:${c#vapt_}:base-pinned" "${from_n:-0}/${from_n:-0}" "${base_ok:-0}/${from_n:-0}" \
+          "$([ "${from_n:-0}" -gt 0 ] && eq "${base_ok:-0}" "${from_n:-0}" || echo false)" \
+          "first-party image: EVERY FROM in $df is digest-pinned"
       tagid=$(docker image inspect "$pinned" --format '{{.Id}}' 2>/dev/null)
       add "NET-B:${c#vapt_}:running" "$tagid" "$imgid" "$(eq "$imgid" "$tagid")" \
           "running container matches the locally built image id (image ref: ${pinned:-<none>})"
@@ -231,10 +266,10 @@ done
 # ============================ Correction 2: host-gateway vs LAN ==============
 for spec in "vapt_api:$EDGE_GW" "vapt_worker:$CORE_GW" "vapt_frontend:$EDGE_GW"; do
   c="${spec%%:*}"; gw="${spec##*:}"
-  r=$(tcp "$c" "$gw" 9)      # nothing listens on 9: ECONNREFUSED proves L3 reach
+  r=$(tcp_any "$c" "$gw" 9)  # nothing listens on 9: ECONNREFUSED proves L3 reach
   case "$r" in ECONNREFUSED|REACHABLE) ok=true;; *) ok=false;; esac
   add "NET-HG:${c#vapt_}:gateway" "ECONNREFUSED|REACHABLE" "$r" "$ok" "container -> host via its network gateway $gw (L3 reachable by design; NOT host isolation)"
-  r=$(tcp "$c" "${LAN_IP:-127.0.0.1}" 9)
+  r=$(tcp_any "$c" "${LAN_IP:-127.0.0.1}" 9)
   add "NET-HG:${c#vapt_}:lan-ip" ENETUNREACH "$r" "$(eq "$r" ENETUNREACH)" "container -> host via the host's LAN IP ${LAN_IP} (must have no route)"
 done
 add "NET-K1" "recorded" "ip_forward=$IP_FORWARD" true "host net.ipv4.ip_forward recorded (LAN-peer->container would additionally need a LAN route)"
@@ -260,11 +295,11 @@ r=$(tcp vapt_api "$PX" 3128);              add NET-H2 REACHABLE "$r" "$(eq "$r" 
 r=$(tcp vapt_api "$PG" 5432);              add NET-H3a REACHABLE "$r" "$(eq "$r" REACHABLE)" "api -> postgres"
 r=$(tcp vapt_api "$RD" 6379);              add NET-H3b REACHABLE "$r" "$(eq "$r" REACHABLE)" "api -> redis"
 r=$(tcp vapt_api "$STANDIN" 8443);         add NET-H4 ENETUNREACH "$r" "$(eq "$r" ENETUNREACH)" "api -> stand-in directly (must go through the proxy)"
-r=$(tcp vapt_frontend "$API_EDGE" 8000);   add NET-I1 REACHABLE "$r" "$(eq "$r" REACHABLE)" "frontend -> api (edge)"
-r=$(tcp vapt_frontend "$PG" 5432);         add NET-I2a ENETUNREACH "$r" "$(eq "$r" ENETUNREACH)" "frontend -> postgres"
-r=$(tcp vapt_frontend "$RD" 6379);         add NET-I2b ENETUNREACH "$r" "$(eq "$r" ENETUNREACH)" "frontend -> redis"
-r=$(tcp vapt_frontend "$PX" 3128);         add NET-I3 ENETUNREACH "$r" "$(eq "$r" ENETUNREACH)" "frontend -> egress proxy (must be unreachable)"
-r=$(tcp vapt_frontend 1.1.1.1 443);        add NET-I4 ENETUNREACH "$r" "$(eq "$r" ENETUNREACH)" "frontend -> internet"
+r=$(tcp_any vapt_frontend "$API_EDGE" 8000); add NET-I1 REACHABLE "$r" "$(reach "$r")" "frontend -> api (edge)"
+r=$(tcp_any vapt_frontend "$PG" 5432); add NET-I2a ENETUNREACH "$r" "$(eq "$r" ENETUNREACH)" "frontend -> postgres"
+r=$(tcp_any vapt_frontend "$RD" 6379); add NET-I2b ENETUNREACH "$r" "$(eq "$r" ENETUNREACH)" "frontend -> redis"
+r=$(tcp_any vapt_frontend "$PX" 3128); add NET-I3 ENETUNREACH "$r" "$(eq "$r" ENETUNREACH)" "frontend -> egress proxy (must be unreachable)"
+r=$(tcp_any vapt_frontend 1.1.1.1 443); add NET-I4 ENETUNREACH "$r" "$(eq "$r" ENETUNREACH)" "frontend -> internet"
 # proxy must not reach application or scanner components
 r=$(tcp vapt_egress_proxy "$PG" 5432);     add NET-J7a "BLOCKED(ENETUNREACH|TIMEOUT)" "$r" "$(blocked "$r")" "proxy -> postgres — the proxy HAS a default route, so unreachability here rests on Docker inter-network isolation (silent DROP), not on absence of a route"
 r=$(tcp vapt_egress_proxy "$RD" 6379);     add NET-J7b "BLOCKED(ENETUNREACH|TIMEOUT)" "$r" "$(blocked "$r")" "proxy -> redis — the proxy HAS a default route, so unreachability here rests on Docker inter-network isolation (silent DROP), not on absence of a route"
