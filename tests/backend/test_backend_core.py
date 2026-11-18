@@ -202,3 +202,73 @@ def test_denied_decisions_are_persisted_and_audited(asset_id):
     assert status == 200
     assert any(r["action"] == "scope_decision" and r["outcome"] == "deny" for r in rows), \
         "a denied scope decision was not audited"
+
+
+# ------------------------------------------- phase 3: discovery behaviour -----
+def _wait_run(run_id: str, timeout_s: int = 40) -> dict:
+    import time
+    for _ in range(timeout_s // 2):
+        status, run = call("GET", f"/discovery-runs/{run_id}")
+        assert status == 200, run
+        if run["state"] not in ("queued", "running"):
+            return run
+        time.sleep(2)
+    pytest.fail(f"discovery run {run_id} did not finish: {run}")
+
+
+def test_fixture_discovery_makes_no_requests_and_builds_the_inventory(asset_id):
+    status, started = call("POST", f"/assets/{asset_id}/discovery-runs?source=fixture",
+                           role="analyst")
+    assert status == 201, started
+    run = _wait_run(started["id"])
+    assert run["state"] == "completed", run
+    assert run["requests_made"] == 0, "a fixture run must not touch the network"
+    assert run["pages_seen"] > 0 and run["coverage_complete"] is True
+
+    status, surface = call("GET", f"/assets/{asset_id}/attack-surface")
+    assert status == 200
+    c = surface["counts"]
+    assert c["endpoints"] > 0 and c["parameters"] > 0 and c["forms"] > 0
+    assert c["auth_entry_points"] > 0 and c["api_endpoints"] > 0
+    assert set(surface["by_assessment"]) <= {"discovered", "verified", "inferred", "unassessed"}
+    # form actions that were never requested must be INFERRED, not discovered
+    assert surface["by_assessment"].get("inferred", 0) > 0
+
+
+def test_repeat_discovery_converges_without_duplicates(asset_id):
+    _, before = call("GET", f"/assets/{asset_id}/attack-surface")
+    status, started = call("POST", f"/assets/{asset_id}/discovery-runs?source=fixture",
+                           role="analyst")
+    assert status == 201
+    _wait_run(started["id"])
+    _, after = call("GET", f"/assets/{asset_id}/attack-surface")
+    assert after["counts"]["endpoints"] == before["counts"]["endpoints"], \
+        "a repeat run duplicated endpoints instead of upserting"
+    assert after["by_assessment"].get("verified", 0) > 0, \
+        "a surface seen in a later run should be promoted to verified"
+
+
+def test_candidate_tests_are_deterministic_and_flag_intrusive(asset_id):
+    status, body = call("GET", f"/assets/{asset_id}/candidate-tests")
+    assert status == 200 and body["candidates"], body
+    assert body["matrix_version"]
+    concerns = {c["concern"] for c in body["candidates"]}
+    assert {"injection", "authentication_weaknesses", "security_misconfiguration"} <= concerns
+    injection = [c for c in body["candidates"] if c["concern"] == "injection"]
+    assert injection and all(c["requires_intrusive"] for c in injection)
+    assert "never findings" in body["note"]
+
+
+def test_live_discovery_is_denied_without_authorisation(asset_id):
+    status, body = call("POST", f"/assets/{asset_id}/discovery-runs?source=live&profile_key=zap-passive",
+                        role="analyst")
+    assert status == 409, body
+    assert body["type"].endswith("scope-denied")
+    assert not body["scope_decision"]["gate_results"][0]["pass"]
+
+
+def test_no_live_discovery_run_rows_exist(asset_id):
+    status, runs = call("GET", f"/assets/{asset_id}/discovery-runs")
+    assert status == 200
+    assert all(r["source"] == "fixture" for r in runs), \
+        "a live discovery run was created despite the denial"

@@ -1,7 +1,7 @@
 # Agentic Web VAPT Platform
 
 AI-assisted web vulnerability assessment platform for **authorised, locally hosted mock targets
-only**. Current state: **M1 accepted**; **M1.5 provisionally accepted**; **MVP phase 1 done** (real digest-pinned PostgreSQL/Redis, proxy hardened and adversarially tested, 108/108 network probes). **Phase 2 done**: FastAPI + PostgreSQL schema + auth + the 13-gate preflight chain + audit chain (108/108 network probes, 20/20 backend tests). Phase 3 (worker + discovery) next. No application code exists yet. Scope: `docs/MVP_SCOPE.md`.
+only**. Current state: **M1 accepted**; **M1.5 provisionally accepted**; **MVP phase 1 done** (real digest-pinned PostgreSQL/Redis, proxy hardened and adversarially tested, 108/108 network probes). **Phase 2 done**: FastAPI + PostgreSQL schema + auth + the 13-gate preflight chain + audit chain (108/108 network probes, 20/20 backend tests). **Phase 3 done**: Celery worker (dual-homed core+lab), guarded HTTP client, attack-surface inventory and deterministic candidate-test matrix (113/113 network probes, 53/53 backend tests). Phase 4 (ZAP adapter) next. No application code exists yet. Scope: `docs/MVP_SCOPE.md`.
 
 Read `CLAUDE.md` for the engineering rules, then the design set in `docs/`:
 
@@ -30,6 +30,7 @@ Read `CLAUDE.md` for the engineering rules, then the design set in `docs/`:
 | [docs/MVP_PLAN.md](docs/MVP_PLAN.md) | **phased MVP plan**: reuse inventory, dependencies, acceptance, carried conditions |
 | [docs/MVP_PHASE1_REPORT.md](docs/MVP_PHASE1_REPORT.md) | phase 1: real datastores + proxy security review |
 | [docs/MVP_PHASE2_REPORT.md](docs/MVP_PHASE2_REPORT.md) | phase 2: backend core — API, schema, auth, gate chain, audit |
+| [docs/MVP_PHASE3_REPORT.md](docs/MVP_PHASE3_REPORT.md) | phase 3: worker, discovery, attack-surface inventory, candidate tests |
 | [docs/MVP_SCOPE.md](docs/MVP_SCOPE.md) | **adopted MVP scope**, build/defer, reconciliation with binding decisions, the open ruling on active tests |
 | [docs/M1_5_PLAN.md](docs/M1_5_PLAN.md) | M1.5 scope and the five owner corrections |
 | [docs/M1_5_REPORT.md](docs/M1_5_REPORT.md) | M1.5 results: 91 probes, induced-failure evidence, limitations |

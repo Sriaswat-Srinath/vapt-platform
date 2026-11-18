@@ -98,7 +98,7 @@ finally: s.close()" 2>/dev/null || echo PROBE_ERROR
 # ============================ Correction 5: attachments, identity, config ====
 cfg=$(docker compose -f docker-compose.yml config --format json 2>/dev/null)
 for spec in "vapt_frontend:vapt_edge" "vapt_api:vapt_core,vapt_edge,vapt_egress" \
-            "vapt_worker:vapt_core" "vapt_postgres:vapt_core" "vapt_redis:vapt_core" \
+            "vapt_worker:vapt_core,vapt_lab" "vapt_postgres:vapt_core" "vapt_redis:vapt_core" \
             "vapt_egress_proxy:vapt_egress,vapt_wan" "vapt_llm_standin:vapt_wan"; do
   c="${spec%%:*}"; want="${spec##*:}"
   got=$(docker inspect "$c" --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}},{{end}}' 2>/dev/null | tr ',' '\n' | grep -v '^$' | sort | paste -sd, -)
@@ -111,7 +111,7 @@ done
 #                          Their Dockerfile's FROM MUST be digest-pinned, and the
 #                          running container MUST match the locally built image id
 #                          (no floating tag drift).
-FIRST_PARTY="vapt_api"
+FIRST_PARTY="vapt_api vapt_worker"
 for c in vapt_frontend vapt_api vapt_worker vapt_postgres vapt_redis vapt_egress_proxy vapt_llm_standin; do
   pinned=$(printf '%s' "$cfg" | python3 -c "
 import json,sys
@@ -141,9 +141,15 @@ for n,s in c['services'].items():
 done
 # environment hygiene
 for c in vapt_worker vapt_frontend; do
+  # Flag anything that could CARRY a credential or ENABLE an outbound call.
+  # `LLM_ENABLED=false` is explicitly permitted: it documents the posture and
+  # grants nothing. `LLM_ENABLED=true` on these containers is a failure.
   leak=$(docker inspect "$c" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
-         | grep -icE '^(LLM_|.*API_KEY|HTTPS?_PROXY|ANTHROPIC|OPENAI|ZAP_API_KEY)' || true)
-  add "NET-C:${c#vapt_}" 0 "$leak" "$(eq "$leak" 0)" "no LLM/proxy/credential env in ${c#vapt_}"
+         | grep -icE '^(.*_API_KEY|.*_TOKEN|HTTPS?_PROXY|ANTHROPIC|OPENAI|LLM_(API_KEY|PROVIDER|MODEL|BASE_URL)|ZAP_API_KEY)=' || true)
+  llm_on=$(docker inspect "$c" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
+         | grep -icE '^LLM_ENABLED=(true|1|yes)$' || true)
+  add "NET-C:${c#vapt_}" 0 "$leak" "$(eq "$leak" 0)" "no credential or proxy env in ${c#vapt_}"
+  add "NET-C:${c#vapt_}:llm-off" 0 "$llm_on" "$(eq "$llm_on" 0)" "LLM is not enabled in ${c#vapt_}"
 done
 pxleak=$(docker inspect vapt_egress_proxy --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | grep -icE '^(.*API_KEY|DATABASE_URL|POSTGRES_|REDIS_)' || true)
 add "NET-C:proxy" 0 "$pxleak" "$(eq "$pxleak" 0)" "proxy holds no application credentials"
@@ -232,6 +238,13 @@ r=$(tcp vapt_worker "$API_CORE" 8000);     add NET-G5 ECONNREFUSED "$r" "$(eq "$
 r=$(tcp vapt_worker "$PG" 5432);           add NET-G6a REACHABLE "$r" "$(eq "$r" REACHABLE)" "worker -> postgres"
 r=$(tcp vapt_worker "$RD" 6379);           add NET-G6b REACHABLE "$r" "$(eq "$r" REACHABLE)" "worker -> redis"
 r=$(tcp vapt_worker "$STANDIN" 8443);      add NET-G7 ENETUNREACH "$r" "$(eq "$r" ENETUNREACH)" "worker -> llm stand-in (no WAN route)"
+# Phase 3: the worker joins vapt_lab, so it MUST reach the target and MUST NOT
+# gain anything else. Both directions are asserted.
+r=$(tcp vapt_worker 172.30.10.20 3000);    add NET-G8 REACHABLE "$r" "$(eq "$r" REACHABLE)" "worker -> registered lab target (required for discovery)"
+r=$(tcp vapt_worker 172.30.10.10 8080);    add NET-G9 REACHABLE "$r" "$(eq "$r" REACHABLE)" "worker -> ZAP control port (required from M4)"
+wkegress=$(docker inspect vapt_worker --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' 2>/dev/null | tr -d " " )
+case "$wkegress" in *vapt_wan*|*vapt_egress*) wk_ok=false;; *) wk_ok=true;; esac
+add NET-G10 true "$wk_ok" "$wk_ok" "worker is on NO egress network (observed: $wkegress)"
 r=$(tcp vapt_api 1.1.1.1 443);             add NET-H1 ENETUNREACH "$r" "$(eq "$r" ENETUNREACH)" "api -> internet DIRECT (must be blocked; egress only via the proxy)"
 r=$(tcp vapt_api "$PX" 3128);              add NET-H2 REACHABLE "$r" "$(eq "$r" REACHABLE)" "api -> egress proxy"
 r=$(tcp vapt_api "$PG" 5432);              add NET-H3a REACHABLE "$r" "$(eq "$r" REACHABLE)" "api -> postgres"

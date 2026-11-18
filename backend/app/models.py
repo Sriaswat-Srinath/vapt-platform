@@ -292,3 +292,136 @@ class ScanJobEvent(Base):
     phase: Mapped[str | None] = mapped_column(String(16))
     message: Mapped[str | None] = mapped_column(Text)
     detail: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+
+
+# ------------------------------------------------- discovery / attack surface --
+class DiscoveryRun(Base):
+    __tablename__ = "discovery_runs"
+    id: Mapped[Any] = _pk()
+    asset_id: Mapped[Any] = mapped_column(UUID(as_uuid=True), ForeignKey("assets.id"), nullable=False)
+    scope_grant_id: Mapped[Any | None] = mapped_column(UUID(as_uuid=True), ForeignKey("scope_grants.id"))
+    scope_decision_id: Mapped[Any | None] = mapped_column(UUID(as_uuid=True), ForeignKey("scope_decisions.id"))
+    source: Mapped[str] = mapped_column(String(10), nullable=False)      # fixture | live
+    state: Mapped[str] = mapped_column(String(12), nullable=False)
+    profile_key: Mapped[str | None] = mapped_column(String(60))
+    pages_seen: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    requests_made: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    redirects_blocked: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    coverage_complete: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    stop_reason: Mapped[str | None] = mapped_column(String(32))
+    error: Mapped[str | None] = mapped_column(Text)
+    budget_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    pinned_ips: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+    cancel_requested_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    trace_id: Mapped[str | None] = mapped_column(String(64))
+    created_by: Mapped[Any | None] = mapped_column(UUID(as_uuid=True), ForeignKey("analysts.id"))
+    created_at: Mapped[dt.datetime] = _now()
+    __table_args__ = (
+        CheckConstraint("source in ('fixture','live')", name="ck_discovery_source"),
+        CheckConstraint("state in ('queued','running','completed','failed','cancelled','blocked')",
+                        name="ck_discovery_state"),
+    )
+
+
+class Endpoint(Base):
+    __tablename__ = "endpoints"
+    id: Mapped[Any] = _pk()
+    asset_id: Mapped[Any] = mapped_column(UUID(as_uuid=True), ForeignKey("assets.id"), nullable=False)
+    first_seen_run_id: Mapped[Any | None] = mapped_column(UUID(as_uuid=True), ForeignKey("discovery_runs.id"))
+    last_seen_run_id: Mapped[Any | None] = mapped_column(UUID(as_uuid=True), ForeignKey("discovery_runs.id"))
+    url_normalized: Mapped[str] = mapped_column(String(1024), nullable=False)
+    path: Mapped[str] = mapped_column(String(512), nullable=False)
+    method: Mapped[str] = mapped_column(String(10), nullable=False)
+    status_code_last: Mapped[int | None] = mapped_column(Integer)
+    content_type_last: Mapped[str | None] = mapped_column(String(120))
+    is_api: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    api_style: Mapped[str | None] = mapped_column(String(10))
+    requires_auth_guess: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    auth_entry_kind: Mapped[str] = mapped_column(String(20), default="none", nullable=False)
+    assessment: Mapped[str] = mapped_column(String(12), nullable=False)
+    evidence_note: Mapped[str | None] = mapped_column(Text)
+    first_seen_at: Mapped[dt.datetime] = _now()
+    last_seen_at: Mapped[dt.datetime] = _now()
+    __table_args__ = (
+        UniqueConstraint("asset_id", "url_normalized", "method", name="uq_endpoint_identity"),
+        CheckConstraint("assessment in ('discovered','verified','inferred','unassessed')",
+                        name="ck_endpoint_assessment"),
+    )
+
+
+class EndpointParameter(Base):
+    __tablename__ = "endpoint_parameters"
+    id: Mapped[Any] = _pk()
+    endpoint_id: Mapped[Any] = mapped_column(UUID(as_uuid=True), ForeignKey("endpoints.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    location: Mapped[str] = mapped_column(String(10), nullable=False)
+    sample_value_redacted: Mapped[str | None] = mapped_column(String(200))
+    inferred_type: Mapped[str | None] = mapped_column(String(20))
+    is_required_guess: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    assessment: Mapped[str] = mapped_column(String(12), nullable=False)
+    __table_args__ = (
+        UniqueConstraint("endpoint_id", "name", "location", name="uq_param_identity"),
+        CheckConstraint("location in ('query','path','body','header','cookie')", name="ck_param_location"),
+    )
+
+
+class Form(Base):
+    __tablename__ = "forms"
+    id: Mapped[Any] = _pk()
+    endpoint_id: Mapped[Any] = mapped_column(UUID(as_uuid=True), ForeignKey("endpoints.id"), nullable=False)
+    action_url_normalized: Mapped[str] = mapped_column(String(1024), nullable=False)
+    method: Mapped[str] = mapped_column(String(10), nullable=False)
+    enctype: Mapped[str | None] = mapped_column(String(80))
+    has_csrf_token_field: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_login_candidate: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    assessment: Mapped[str] = mapped_column(String(12), nullable=False)
+    __table_args__ = (UniqueConstraint("endpoint_id", "action_url_normalized", "method",
+                                       name="uq_form_identity"),)
+
+
+class FormField(Base):
+    __tablename__ = "form_fields"
+    id: Mapped[Any] = _pk()
+    form_id: Mapped[Any] = mapped_column(UUID(as_uuid=True), ForeignKey("forms.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    input_type: Mapped[str | None] = mapped_column(String(40))
+    is_password: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    autocomplete: Mapped[str | None] = mapped_column(String(40))
+    __table_args__ = (UniqueConstraint("form_id", "name", name="uq_form_field_identity"),)
+
+
+class ResponseHeader(Base):
+    __tablename__ = "response_headers"
+    id: Mapped[Any] = _pk()
+    endpoint_id: Mapped[Any] = mapped_column(UUID(as_uuid=True), ForeignKey("endpoints.id"), nullable=False)
+    header_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    header_value_sample: Mapped[str | None] = mapped_column(String(400))
+    present: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    observed_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    assessment: Mapped[str] = mapped_column(String(12), nullable=False)
+    __table_args__ = (UniqueConstraint("endpoint_id", "header_name", name="uq_header_identity"),)
+
+
+class CandidateTest(Base):
+    """Deterministic surface -> candidate-test mapping (L2).
+
+    These are TEST CANDIDATES, never findings. The agent may rank and explain
+    them; a human accepts; the gate chain decides (MVP_SCOPE.md §5).
+    """
+    __tablename__ = "candidate_tests"
+    id: Mapped[Any] = _pk()
+    asset_id: Mapped[Any] = mapped_column(UUID(as_uuid=True), ForeignKey("assets.id"), nullable=False)
+    endpoint_id: Mapped[Any | None] = mapped_column(UUID(as_uuid=True), ForeignKey("endpoints.id"))
+    discovery_run_id: Mapped[Any | None] = mapped_column(UUID(as_uuid=True), ForeignKey("discovery_runs.id"))
+    surface_kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    concern: Mapped[str] = mapped_column(String(60), nullable=False)
+    suggested_profile_key: Mapped[str | None] = mapped_column(String(60))
+    requires_intrusive: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    rationale: Mapped[str] = mapped_column(Text, nullable=False)
+    matrix_version: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_at: Mapped[dt.datetime] = _now()
+    __table_args__ = (UniqueConstraint("asset_id", "endpoint_id", "concern",
+                                       name="uq_candidate_identity"),)

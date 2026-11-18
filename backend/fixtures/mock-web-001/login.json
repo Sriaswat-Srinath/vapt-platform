@@ -1,0 +1,9 @@
+{
+  "path": "/login",
+  "status": 200,
+  "headers": {
+    "content-type": "text/html; charset=utf-8",
+    "x-powered-by": "Express"
+  },
+  "body": "<!doctype html><html><body>\n <form action=\"/rest/user/login\" method=\"POST\" enctype=\"application/x-www-form-urlencoded\">\n <input name=\"email\" type=\"email\" required autocomplete=\"username\">\n <input name=\"password\" type=\"password\" required autocomplete=\"current-password\">\n <input name=\"_csrf\" type=\"hidden\" value=\"\">\n <button type=\"submit\">Log in</button></form></body></html>"
+}

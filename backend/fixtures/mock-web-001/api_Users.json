@@ -1,0 +1,9 @@
+{
+  "path": "/api/Users",
+  "status": 401,
+  "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff"
+  },
+  "body": "{\"error\":{\"message\":\"Unauthorized\"}}"
+}

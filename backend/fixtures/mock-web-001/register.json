@@ -1,0 +1,9 @@
+{
+  "path": "/register",
+  "status": 200,
+  "headers": {
+    "content-type": "text/html; charset=utf-8",
+    "x-powered-by": "Express"
+  },
+  "body": "<!doctype html><html><body>\n <form action=\"/api/Users\" method=\"POST\">\n <input name=\"email\" type=\"email\" required><input name=\"password\" type=\"password\" required>\n <input name=\"passwordRepeat\" type=\"password\" required>\n <select name=\"securityQuestion\"><option>1</option></select>\n <input name=\"securityAnswer\" type=\"text\"></form></body></html>"
+}

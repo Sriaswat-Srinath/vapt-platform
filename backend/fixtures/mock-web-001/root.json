@@ -1,0 +1,9 @@
+{
+  "path": "/",
+  "status": 200,
+  "headers": {
+    "content-type": "text/html; charset=utf-8",
+    "x-powered-by": "Express"
+  },
+  "body": "<!doctype html><html><head><title>Juice Shop (synthetic fixture)</title></head>\n <body><nav><a href=\"/#/login\">Login</a><a href=\"/#/register\">Register</a>\n <a href=\"/rest/products/search?q=\">Search</a><a href=\"/api/Products\">Products API</a>\n <a href=\"/api/Users\">Users API</a><a href=\"/#/contact\">Contact</a><a href=\"/ftp\">ftp</a></nav>\n <form action=\"/rest/products/search\" method=\"GET\"><input name=\"q\" type=\"text\" required></form>\n </body></html>"
+}

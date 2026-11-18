@@ -1,0 +1,8 @@
+{
+  "path": "/robots.txt",
+  "status": 200,
+  "headers": {
+    "content-type": "text/plain"
+  },
+  "body": "User-agent: *\nDisallow: /ftp"
+}

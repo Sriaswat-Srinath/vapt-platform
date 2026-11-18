@@ -1,0 +1,9 @@
+{
+  "path": "/contact",
+  "status": 200,
+  "headers": {
+    "content-type": "text/html; charset=utf-8",
+    "x-powered-by": "Express"
+  },
+  "body": "<!doctype html><html><body>\n <form action=\"/api/Feedbacks\" method=\"POST\"><textarea name=\"comment\" required></textarea>\n <input name=\"rating\" type=\"number\"><input name=\"captcha\" type=\"text\">\n <input name=\"file\" type=\"file\"></form></body></html>"
+}

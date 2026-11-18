@@ -1,7 +1,7 @@
 # VAPT application stack — M1.5 TOPOLOGY VERIFICATION.
 #
-# postgres, redis and the api are REAL services (MVP phases 1-2). frontend and
-# worker are still PLACEHOLDERS (lab/placeholders/listen.py): they hold a
+# postgres, redis, the api and the worker are REAL services (MVP phases 1-3).
+# Only the frontend is still a PLACEHOLDER (lab/placeholders/listen.py): they hold a
 # container open on an explicit address so topology stays measurable until the
 # application exists. No endpoints, no migrations, no authentication, no scanner
 # adapter yet. Replacing a placeholder must preserve every NET-* property —
@@ -18,6 +18,11 @@
 name: vapt
 
 networks:
+  vapt_lab:
+    # EXTERNAL: the lab is its own compose project (vapt-lab) and owns this
+    # network. The worker joins it; the api never does.
+    name: ${LAB_NETWORK_NAME:-vapt_lab}
+    external: true
   vapt_edge:
     name: ${EDGE_NETWORK_NAME:-vapt_edge}
     driver: bridge
@@ -145,17 +150,55 @@ services:
         ipv4_address: 172.30.22.20
 
   worker:
-    <<: *placeholder
+    # REAL Celery worker (MVP phase 3). Dual-homed vapt_core + vapt_lab: it is
+    # the ONLY component that can reach the target, and therefore the
+    # authoritative evaluator of gate 8 (resolve-once-and-pin).
+    # It holds NO LLM credentials and NO proxy variables: airgapped from the
+    # internet directly and indirectly (NET-G1..G7).
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: vapt-api:dev
     container_name: vapt_worker
     hostname: worker
-    # NO proxy variables, NO LLM variables, NO credentials. Airgapped by
-    # topology: vapt_core only in M1.5 (vapt_lab is added in M3).
+    restart: "no"
+    init: true
+    read_only: true
+    user: "65532:65532"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 768m
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    command: ["celery", "-A", "app.worker.celery_app.celery", "worker",
+              "--loglevel=INFO", "--concurrency=1", "-Q", "vapt"]
     environment:
-      SERVICE_NAME: worker
-      BIND_SPEC: "172.30.21.30:9000"
+      APP_ENV: ${APP_ENV:-dev}
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-vapt}:${POSTGRES_PASSWORD:?}@172.30.21.40:5432/${POSTGRES_DB:-vapt}
+      REDIS_URL: redis://172.30.21.50:6379/0
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?}
+      SCANNER_EXECUTION_ENABLED: ${SCANNER_EXECUTION_ENABLED:-false}
+      ZAP_ADAPTER_ENABLED: ${ZAP_ADAPTER_ENABLED:-false}
+      ACTIVE_SCAN_ENABLED: ${ACTIVE_SCAN_ENABLED:-false}
+      DUAL_CONTROL_AVAILABLE: ${DUAL_CONTROL_AVAILABLE:-false}
+      DEFAULT_SCANNER_ADAPTER: ${DEFAULT_SCANNER_ADAPTER:-mock}
+      LAB_SUBNET: ${LAB_SUBNET:-172.30.10.0/24}
+      LLM_ENABLED: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       vapt_core:
         ipv4_address: 172.30.21.30
+      vapt_lab:
+        ipv4_address: 172.30.10.30
 
   postgres:
     # REAL service (MVP phase 1) — digest-pinned. vapt_core only: no egress path.

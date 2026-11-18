@@ -1,0 +1,9 @@
+{
+  "path": "/ftp",
+  "status": 200,
+  "headers": {
+    "content-type": "text/html; charset=utf-8",
+    "x-powered-by": "Express"
+  },
+  "body": "<!doctype html><html><body><h1>Index of /ftp</h1>\n <a href=\"/ftp/acquisitions.md\">acquisitions.md</a><a href=\"/ftp/package.json.bak\">package.json.bak</a>\n </body></html>"
+}

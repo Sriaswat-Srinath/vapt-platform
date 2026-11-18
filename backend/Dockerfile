@@ -11,6 +11,7 @@ RUN pip install --no-cache-dir -r /srv/requirements.txt
 COPY alembic.ini /srv/alembic.ini
 COPY migrations /srv/migrations
 COPY app /srv/app
+COPY fixtures /srv/fixtures
 
 # Non-root. The app writes nothing to disk.
 USER 65532:65532
