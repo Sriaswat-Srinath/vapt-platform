@@ -1,7 +1,47 @@
 # Agentic Web VAPT Platform
 
-AI-assisted web vulnerability assessment platform for **authorised, locally hosted mock targets
-only**. Current state: **M1 accepted**; **M1.5 provisionally accepted**; **MVP phase 1 done** (real digest-pinned PostgreSQL/Redis, proxy hardened and adversarially tested, 108/108 network probes). **Phase 2 done**: FastAPI + PostgreSQL schema + auth + the 13-gate preflight chain + audit chain (108/108 network probes, 20/20 backend tests). **Phase 3 done**: Celery worker (dual-homed core+lab), guarded HTTP client, attack-surface inventory and deterministic candidate-test matrix (113/113 network probes, 53/53 backend tests). **Phase 4 done**: adapter contract, mock + ZAP adapters, global daemon lease, immutable raw observations with provenance, measured cancellation (115/115 network probes, 78/78 backend tests; invariants I8 and I13 implemented). **Phase 5 done**: normalisation, fingerprint/dedup, evidence with keyed-HMAC redaction, the deterministic validation engine (all five states, negative evidence suppressed under partial coverage) and CVSS from a curated catalogue. 10 of 14 invariants now have real tests. Phase 6 (AI analyst) next. No application code exists yet. Scope: `docs/MVP_SCOPE.md`.
+AI-assisted web vulnerability assessment for **authorised, locally hosted synthetic targets
+only**. The product is a scanner pipeline, but most of the engineering is in the machinery that
+**refuses** to scan, and in making every refusal legible.
+
+> **No live scan has ever run.** Every finding, figure and report in this repository derives from
+> hand-authored, scanner-shaped fixtures. The authorisation document for the lab target is an
+> unsigned draft, scanner execution is disabled, and the preflight chain denies accordingly. That
+> is the system working as designed, and the reports say so in their own words.
+>
+> `brakes-vapt.test` is a **local fiction** using the reserved `.test` TLD (RFC 6761). It resolves
+> only inside a Docker network on one laptop. Nothing here describes, touches or is authorised to
+> touch any real production, staging or corporate system.
+
+## What is built
+
+| Area | State |
+|---|---|
+| Asset, scope and authorisation management | 13-gate deterministic preflight chain, evaluated twice (API and worker) |
+| Containment | 5 Docker networks, 118 network probes, 46 lab probes, plus scripts that deliberately break each control to prove the checks can fail |
+| Discovery | endpoints, parameters, forms, headers, cookies → deterministic candidate tests |
+| Scanner integration | adapter contract, ZAP + mock adapters, exclusive daemon lease, measured cancellation |
+| Findings | fingerprint dedup, redaction on write, content-addressed evidence, five validation states from deterministic rule packs, CVSS from a curated catalogue |
+| Taxonomy and coverage | 20 categories as first-class data; coverage reports **the zeroes**, including what this build cannot detect |
+| Reporting | nine sections in HTML / JSON / PDF, with limitations derived from what actually happened |
+| AI analyst | advisory only — a fixed tool catalogue, a refusing outbound boundary, and a conversational mode whose every tool is a **read** |
+| Operations | retention with a halting purge, rate limiting, hash-chained audit, CI, lint and types |
+
+14 security invariants, each with an implemented test and a manifest test that fails if one is
+ever quietly skipped.
+
+## Start here
+
+* [docs/PROJECT_EXPLAINED.txt](docs/PROJECT_EXPLAINED.txt) — the system at a high level, then in detail
+* [docs/GAPS.txt](docs/GAPS.txt) — what is **not** done, grouped by what would close it
+* [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) — one rehearsed end-to-end journey
+
+```bash
+make lab-up net-up        # lab and application plane
+make db-migrate db-seed   # schema and seed data
+make lab-check            # containment, measured rather than assumed
+make m9-readiness         # what remains before a first genuine assessment
+```
 
 Read `CLAUDE.md` for the engineering rules, then the design set in `docs/`:
 
