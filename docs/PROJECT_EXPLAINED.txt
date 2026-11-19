@@ -1,0 +1,377 @@
+================================================================================
+AGENTIC WEB VAPT PLATFORM — HOW IT WORKS
+Written 2026-11-19 against commit 212ba29.
+Part A is the high-level explanation. Part B is the low-level one.
+Every number here was read from the running system, not estimated.
+================================================================================
+
+
+################################################################################
+PART A — HIGH LEVEL
+################################################################################
+
+A1. WHAT THE PRODUCT IS
+--------------------------------------------------------------------------------
+A platform for a security analyst to assess a web application and produce a
+defensible report. An analyst registers a target, discovers its attack surface,
+runs a scanner against it under written authorisation, reviews findings that
+carry evidence and provenance, optionally asks an AI analyst to explain them,
+and exports a report.
+
+What makes it unusual is not the scanning. It is that the platform spends most
+of its effort on REFUSING to scan. The interesting engineering is in the
+machinery that decides "no", and in making that decision legible.
+
+
+A2. THE ONE SENTENCE THAT EXPLAINS THE DESIGN
+--------------------------------------------------------------------------------
+A scanner is a tool that sends unsolicited traffic to someone else's computer,
+so the question "am I allowed to do this, to this target, right now?" has to be
+answered by code that cannot be talked out of it.
+
+Everything follows from that:
+  - the answer is deterministic Python, never a model
+  - it is answered twice, in two different processes
+  - the component that can reach the target has no route to anything else
+  - the authorisation is a signed document whose integrity is re-checked
+  - a refusal explains itself, so a human can act on it
+
+
+A3. THE THREE LAYERS OF AUTHORITY
+--------------------------------------------------------------------------------
+  L1  EXECUTION   OWASP ZAP (and a mock adapter) do the probing. They are
+                  driven, never trusted: their output is data, and their
+                  network position is constrained from outside.
+
+  L2  DECISION    FastAPI + PostgreSQL. Pure Python decides scope, gates,
+                  validation state, CVSS and retention. Every decision is
+                  persisted and hash-chained into an audit log.
+
+  L3  ADVISORY    The AI analyst. It proposes from a fixed catalogue of six
+                  actions and can change nothing. Accepting its proposal
+                  records a human's agreement; it applies nothing.
+
+The rule that holds this together: a layer may NARROW what the layer below
+permits, never widen it.
+
+
+A4. THE END-TO-END WORKFLOW (what an analyst actually does)
+--------------------------------------------------------------------------------
+  1. REGISTER     Add the asset. A real public domain is refused here, before a
+                  database row exists.
+  2. AUTHORISE    A human signs an authorisation document naming that one
+                  target. Its digest is recorded and re-verified at scan time.
+  3. SCOPE        Include/exclude rules say which paths may be touched. An
+                  exclude always beats an include.
+  4. DISCOVER     Crawl the surface: endpoints, parameters, forms, headers,
+                  cookies. Produces CANDIDATE TESTS — statements about surface,
+                  never about vulnerabilities.
+  5. ASSESS       Request an assessment. 13 gates decide. If any denies, the
+                  analyst sees which one and why, and nothing is contacted.
+  6. SCAN         The worker re-runs all 13 gates itself, pins the resolved
+                  address, takes an exclusive lease on the scanner, and runs
+                  within a budget it cannot exceed.
+  7. NORMALISE    Raw scanner output becomes findings: deduplicated by
+                  fingerprint, evidence redacted on write, provenance recorded.
+  8. VALIDATE     Deterministic rule packs decide confirmed / false positive /
+                  not applicable / inconclusive / candidate — from the stored
+                  evidence, never from the scanner's own confidence.
+  9. EXPLAIN      (optional) The AI analyst proposes explanations and
+                  remediation wording, each citing the finding it describes.
+ 10. REPORT       Nine sections in HTML, JSON and PDF, including a COVERAGE
+                  section listing the categories the build cannot detect, and a
+                  limitations section derived from what actually happened.
+
+
+A5. THE IDEA THAT MATTERS MOST: SAYING WHAT YOU DIDN'T LOOK AT
+--------------------------------------------------------------------------------
+A vulnerability report that lists five findings implies "these are the problems".
+That is almost never true, and the gap between those two statements is where
+security reports mislead people.
+
+So the platform counts, per vulnerability category, what THIS BUILD could have
+found — and reports the zeroes. Right now, of 12 priority categories:
+
+    5  detects .......... a rule pack can reach a verdict from stored evidence
+    1  partial .......... some detections decidable; the category needs more
+    5  surface only ..... the surface is identified, confirmation isn't possible
+    1  no capability .... nothing in this build can report it at all
+
+Every report says this in its own words, e.g.:
+  "1 of 12 Tier-1 categories were NOT assessable by this build: Business Logic.
+   No detection exists for them here, so their absence from this report is not
+   evidence of their absence in the target."
+
+The same honesty rule runs through the whole system: absence of evidence is
+only evidence of absence when collection was complete. If a scan was cancelled
+or hit its budget, negative-evidence rules resolve to "inconclusive" instead of
+"confirmed". The platform under-reports on purpose.
+
+
+A6. WHERE THE PROJECT ACTUALLY IS
+--------------------------------------------------------------------------------
+  Built and tested:  asset/scope management, the 13-gate chain, discovery,
+                     scanner adapters, findings + validation + CVSS, dashboard
+                     (8 screens), HTML/JSON/PDF reporting, taxonomy and
+                     coverage, the advisory agent, retention, rate limiting,
+                     CI, lint and types.
+
+  NOT yet done:      no live scan has ever run. Every finding in the system
+                     comes from hand-authored scanner-shaped fixtures. The
+                     authorisation document is an unsigned draft, so gate 5
+                     denies; scanner execution is disabled, so gate 1 denies;
+                     and a foreign listener on this machine fails host hygiene,
+                     so gate 2 denies.
+
+That is the system working, not a defect. The next milestone (M9) is the first
+genuine passive assessment, and it needs a human signature before anything else.
+
+
+################################################################################
+PART B — LOW LEVEL
+################################################################################
+
+B1. THE SHAPE OF THE CODE
+--------------------------------------------------------------------------------
+  backend/app/            73 Python files, ~9,700 lines
+    safety/scope_policy.py    the 13 gates. Pure: no I/O inside a gate.
+    services.py               builds the immutable request snapshot; persists
+                              decisions
+    api/v1/*.py               65 endpoints (system, assets, scope, discovery,
+                              jobs, findings, taxonomy, agent, reports, audit)
+    worker/tasks.py           discovery, assessment, scanner reset, purge
+    worker/daemon_lease.py    exclusive ZAP lease (advisory lock + unique index)
+    scanners/{zap,mock}/      adapter protocol, budgets, cancellation
+    discovery/               extractors, classifier, inventory
+    normalization/           fingerprinting, ZAP rule -> catalogue mapping
+    validation/engine.py     deterministic rule packs
+    evidence/               redaction on write; content-addressed blob store
+    risk/cvss.py            CVSS parsed from the curated catalogue only
+    agent/                  boundary, tools, prompts, parsing, client, runner
+    retention.py            reference-aware halting purge
+    ratelimit.py            per-principal limiter with a local fallback
+    reporting/              assembler + HTML/JSON/PDF renderers
+  frontend/                React + TypeScript, 8 screens, served by nginx
+  41 database tables, 16 migrations, 267 tests
+
+
+B2. THE 13 GATES (in order; the chain short-circuits on the first denial)
+--------------------------------------------------------------------------------
+   1  scanner_execution_enabled   is the global kill switch on?
+   2  lab_isolation_valid         containment AND host hygiene, both measured
+   3  asset_registered            is it a registered, active asset?
+   4  environment_is_mock         environment == mock_lab, or deny
+   5  grant_active                active grant + SIGNED document + the attested
+                                  digest still matches what was approved
+   6  profile_allowed             is this scan profile permitted by the grant?
+   7  intrusive_approval          if intrusive: two independent human approvals
+   8  target_resolution           every resolved IP inside the grant's CIDRs
+   9  port_allowed                port in the grant's allowlist
+  10  scope_rules                 path matches an include and no exclude
+  11  concurrency_budget          under the platform-wide job ceiling
+  12  no_conflicting_job          no other job running against this asset
+  13  scanner_daemon_available    daemon present and not marked dirty
+
+Properties that make it trustworthy:
+  - PURE: a gate reads a frozen snapshot; it performs no I/O
+  - TOTAL: any exception inside a gate becomes a DENY. There is no path where a
+    crash reads as permission
+  - ORDERED and SHORT-CIRCUITING for the real decision; a dry run evaluates all
+    13 so the analyst sees the whole picture
+  - VERSIONED: POLICY_VERSION is stored on every decision (now 1.2.0)
+  - EVALUATED TWICE: once in the API for a fast legible denial, once in the
+    worker, which is the authoritative evaluator because only it can resolve
+    the lab hostname
+
+Fixture mode: 8 of the 13 are "execution gates". In fixture mode — which
+replays recorded data and opens no socket — they are recorded as NOT
+APPLICABLE, not as passed. A fixture decision can never authorise a scan,
+because `live` is the only mode an adapter that touches the target accepts.
+
+
+B3. NETWORK TOPOLOGY (the control that does not depend on application code)
+--------------------------------------------------------------------------------
+  vapt_edge    internal   dashboard + API (the API's listener binds HERE ONLY)
+  vapt_core    internal   API + worker + PostgreSQL + Redis
+  vapt_egress  internal   API + egress proxy
+  vapt_wan     bridge     egress proxy + LLM stand-in   <- the ONLY WAN route
+  vapt_lab     internal   worker + ZAP + the target (172.30.10.0/24)
+
+  - The WORKER is the only component on vapt_lab. It has NO egress network and
+    NO default route: measured ENETUNREACH to the internet, the LAN and even
+    the egress proxy.
+  - The API has no internet route at all. Its only outbound path is the
+    CONNECT-only egress proxy, which allowlists exactly one destination.
+  - 118 probes verify this (`make net-verify`), and an induced-failure script
+    proves the check can fail when a route is deliberately introduced.
+
+Two measured facts that corrected early assumptions:
+  - Docker SILENTLY IGNORES `ports:` on a container attached only to internal
+    networks. Nothing was ever published, but nor was the error reported.
+  - `internal: true` is NOT host isolation. The host can reach container
+    addresses directly. Containment means container->internet and container->LAN
+    are blocked, which is what is actually measured.
+
+
+B4. HOW A SCAN RUNS (worker, step by step)
+--------------------------------------------------------------------------------
+  1. CLAIM      write a `preflight` event so the timeline shows the worker took it
+  2. RE-GATE    all 13 gates again, in the same mode the request was admitted
+                under, excluding this job from the conflicting-job count
+  3. PIN        freeze the resolved addresses onto the job. Everything after
+                this uses the pinned address: a late DNS change cannot redirect
+                the scan (resolve-once-and-pin)
+  4. LEASE      if the adapter needs exclusive use of the daemon, take a global
+                PostgreSQL advisory lock + a partial unique index, heartbeated
+  5. SCAN       run under the profile's budget (requests/sec, total requests,
+                duration, spider depth, excluded paths, method denylist) while
+                polling a COMMITTED cancellation flag
+  6. INGEST     store raw observations and request/response bytes; normalise,
+                fingerprint, redact, validate, attach CVSS
+  7. CLOSE      set coverage_complete honestly. A cancelled or truncated job is
+                PARTIAL, and partial coverage suppresses negative-evidence rules
+
+
+B5. FINDINGS: IDENTITY, EVIDENCE, VALIDATION
+--------------------------------------------------------------------------------
+IDENTITY (fingerprint)
+  A digest over asset + catalogue key + rule id + method + normalised URL +
+  PARAMETER NAME + evidence class. Parameter VALUES are stripped, so scanning
+  twice does not double-count, but a different parameter stays distinct.
+  Changing the evidence class re-opens identity, because "the header is
+  missing" and "the header has a bad value" are different problems.
+
+EVIDENCE
+  Redacted ON WRITE (credentials, tokens, cookies, JWTs, emails). The
+  unredacted original goes to a content-addressed blob store: atomic write,
+  mode 0600, deduplicated by digest, never mounted into a scanner container.
+  Correlation uses a KEYED HMAC (`ref=hmac:v1:...`) so two occurrences of the
+  same secret can be linked without publishing a digest of the secret.
+  Redaction fails closed and is IDEMPOTENT — a second pass removes nothing,
+  which is the property the agent's outbound check relies on.
+
+VALIDATION (five states, five rule packs)
+  confirmed       the evidence supports the claim
+  false_positive  the evidence contradicts it
+  not_applicable  true but irrelevant here (a browser header on a JSON API)
+  inconclusive    coverage was too thin to say
+  candidate       no rule covers it — kept and surfaced, never dropped
+
+  Rule packs decide from STORED EVIDENCE: missing_header, header_value,
+  pattern_in_body, reflected_input, cookie_attribute. An unknown evidence class
+  is a candidate, never a confirmation, and a rule that raises is also a
+  candidate.
+
+
+B6. THE TAXONOMY AND COVERAGE
+--------------------------------------------------------------------------------
+20 categories (12 Tier-1, 8 Tier-2) are seeded rows, whether or not this build
+can detect them — that is what makes the zeroes reportable. Discovery concerns
+and finding categories are THE SAME KEYS, so a flagged surface counts toward
+its category.
+
+Each category declares `assertability`: passive (confirmable from observed
+traffic), active (needs crafted requests — intrusive, dual control) or manual
+(needs human judgement). That is a property of the category, not of our
+progress: no build will ever confirm a business-logic flaw with a scanner.
+
+`detection` is COMPUTED at query time from catalogue entries, rule packs that
+can decide their evidence classes, flagged surfaces and stored findings.
+26 catalogue entries cover 11 of 12 Tier-1 categories.
+
+
+B7. THE AI ANALYST (L3)
+--------------------------------------------------------------------------------
+MODEL     claude-haiku-4-5. Two model-specific rules enforced in code:
+          `output_config.effort` is an ERROR on this model and is never sent;
+          thinking takes an explicit budget, not the adaptive form.
+
+TRANSPORT Official Anthropic SDK -> CONNECT-only egress proxy -> TLS. The API
+          has no default route, so nothing bypasses the proxy. No key
+          configured means the client refuses to construct.
+
+PROMPTS   One focused request per question (400-1,200 tokens) instead of one
+          asking six at once (~6,900). A full run is ~10k in / 1.5k out,
+          about 1.8 cents.
+
+OUTBOUND  Stage-2 boundary re-redacts every string and REFUSES to send if that
+          pass removes anything (I5), if a bare 32+ char digest appears (I11),
+          or if deployment-identifying material (platform token, provider API
+          key, connection string, internal address) is present.
+
+HANDLES   The model receives opaque handles (f1, f2...), never platform
+          identifiers, scoped to ONE request — so it cannot cite a finding it
+          was not given.
+
+INBOUND   Six allowlisted tools. Anything else — including named forbidden
+          intents (set_validation_state, set_cvss, start_assessment,
+          run_command) — is rejected AND STORED, because a model trying to do
+          something it cannot is the behaviour most worth seeing. A proposal
+          answering a different question than the one asked is recorded as
+          drift. Accepting a proposal changes nothing.
+
+MEASURED  `make agent-eval` scores malformed JSON, schema violations, invented
+          citations and groundedness. `make prove-agent-eval` demonstrates the
+          scorer DETECTS a deliberately bad model rather than only agreeing
+          with a good one.
+
+
+B8. RETENTION, LIMITS, AUDIT
+--------------------------------------------------------------------------------
+RETENTION   Purges unredacted BLOBS only, when nothing references them
+            (evidence rows, report pins, raw observations and report artifacts
+            all count). Every candidate is verified BEFORE any is deleted, so
+            an inconsistency means the batch deletes NOTHING. Selection is by
+            current facts, so a repeat run is a no-op. Off by default; the API
+            endpoint is dry-run unless asked; admin only.
+
+RATE LIMIT  Per-principal, reads and writes separated, health exempt. When
+            Redis cannot answer, an in-process counter still applies — there is
+            never NO limit. It protects availability, not a boundary.
+
+AUDIT       Append-only, hash-chained from a genesis value. Every decision,
+            approval, override, download and agent review is recorded with
+            actor kind and outcome. `GET /audit/verify` walks the chain.
+
+
+B9. ASSURANCE
+--------------------------------------------------------------------------------
+  14 invariants, all with implemented tests, e.g.
+     I4   no scanner worker has internet access         (measured)
+     I5   no LLM request contains unredacted evidence
+     I10  no report represents synthetic findings as real ones
+     I12  purge is idempotent and halts on inconsistency
+     I13  cancellation completes within the SLA         (measured, 1.6s)
+  A MANIFEST test fails the build if an invariant is still skipped after its
+  milestone has landed — the realistic failure mode is not a deleted safety
+  test but a quietly skipped one.
+
+  Current: backend + invariants 282 passed; lab + network 118 passed;
+  net_verify 118/118 probes; lint and type checks clean; CI runs lint, types,
+  the manifest and the code-only tests, and states plainly that it cannot
+  verify containment (only the machine running the lab can).
+
+  Several controls are proven to FAIL on demand, not just to pass:
+     scripts/prove_net_failure.sh            containment check detects a route
+     scripts/prove_isolation_failure.sh      lab check detects a breach
+     scripts/prove_authorisation_tamper.sh   an edited document stops the chain
+     make prove-agent-eval                   the model scorer detects a bad model
+
+
+B10. WHAT TO RUN
+--------------------------------------------------------------------------------
+  make lab-up / net-up         bring up the lab and the application plane
+  make db-migrate db-seed      schema and seed data
+  make api-publish frontend-publish   loopback-only forwarders (nothing is
+                                      published to the network)
+  make lab-check net-verify    containment and topology, measured
+  make m9-readiness            what remains before the first live assessment
+  make detection-eval          score the engine against the detection dataset
+  make agent-eval              score whatever model the agent points at
+  make ci-local                lint, types, invariants, code-only tests
+
+================================================================================
+Everything above describes code that exists and tests that run. The one thing
+it does not describe is a live scan: that has never happened, by design, and
+needs a human signature before it can.
+================================================================================

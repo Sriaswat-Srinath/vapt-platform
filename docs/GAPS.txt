@@ -1,260 +1,316 @@
 ================================================================================
 VAPT PLATFORM — KNOWN GAPS
-Generated 2026-11-19 against commit cd44983 (taxonomy + advisory agent, P6)
+Generated 2026-11-19 against commit 212ba29 (AI analyst transport on Haiku 4.5).
+Supersedes the 2026-11-19 edition written against cd44983.
 Every figure below was read from the running platform, not estimated.
-
-SUPERSEDED IN PART by MVP Phase 8 (operational hardening). Still open after it:
-  - 1.1/1.2  no live scan; the authorisation document is unsigned      OPEN
-  - 2.x      five Tier-1 categories surface-only, one with no capability
-             (business logic); Tier 2 entirely unimplemented           OPEN
-  - 3.2/3.1  retention and I12                                       CLOSED (P8)
-  - 3.3      API rate limiting                                       CLOSED (P8)
-  - 4.1/4.2  CI, lint and type checking                              CLOSED (P8)
-  - 2.4      fixtures for cryptographic failures and client-side     CLOSED (P8)
-  - 5.1      the Gate 2 decision                                     DECIDED (P8,
-             ADR-0015): both verdicts now required. On this machine that means
-             live execution is additionally blocked at gate 2 until the foreign
-             0.0.0.0:5433 listener is resolved by its owner.
-  - 4.3      frontend tests                                            OPEN
-  - 3.4-3.10 encryption at rest, dual control, single asset, single
-             scanner, auth UX, TLS, agent shape                        OPEN
-See docs/MVP_PHASE8_REPORT.md for what was measured.
 ================================================================================
 
 HOW TO READ THIS
-  Gaps are grouped by the kind of thing that closes them: a human action, a
-  configuration decision, missing code, or something deliberately out of scope.
-  A gap is not a defect. Several of these are the system working as designed —
-  they are listed because a reader of a report must know they exist.
+  Gaps are grouped by what CLOSES them: a human action, a decision, missing
+  code, or something deliberately out of scope. A gap is not a defect —
+  several of these are the system working as designed, and are listed because
+  a reader of a report must know they exist.
+
+WHAT CHANGED SINCE THE LAST EDITION
+  CLOSED   retention + invariant I12 · API rate limiting · CI, lint and types ·
+           fixtures for cryptographic failures and client-side · the Gate 2
+           decision (ADR-0015) · the AI analyst's real transport (it had never
+           spoken to anything but a stand-in) · gate 5 now VERIFIES the
+           authorisation document digest it always claimed to verify
+  NEW      three gaps that only appear once the agent can reach a provider
+           (§3.1-3.3), and the M9 readiness picture (§1.4)
+  UNMOVED  no live scan · five Tier-1 categories surface-only · business logic ·
+           all of Tier 2 · dual control · frontend tests · encryption at rest
 
 
 --------------------------------------------------------------------------------
 1. THE BLOCKING GAP — nothing has ever been scanned
 --------------------------------------------------------------------------------
 
-1.1  No live scan has ever run. Every finding, figure, report and coverage
-     number in the platform derives from hand-authored, ZAP-shaped fixtures
-     replayed in fixture mode. Real alert volumes, field shapes and
+1.1  No live scan has ever run. 99 assessments exist; ALL of them are fixture
+     mode (83 completed, 11 cancelled, 4 blocked, 1 failed). Every finding,
+     figure, report and coverage number derives from hand-authored,
+     scanner-shaped fixtures. Real alert volumes, field shapes and
      false-positive rates will differ.
-     Closed by: a human signing lab/authorisation/MOCK-WEB-001.md, then
-     enabling scanner execution.
+     Closed by: M9 — the sequence in §1.4.
 
-1.2  lab/authorisation/MOCK-WEB-001.md is an UNSIGNED DRAFT and is byte-
-     identical to its first commit (83497ce). Gate 5 therefore denies every
-     live assessment. This is the designed blocker, not a defect.
-     Closed by: a human. The platform must not and cannot sign it.
+1.2  lab/authorisation/MOCK-WEB-001.md is an UNSIGNED DRAFT, byte-identical to
+     its first commit (83497ce). Gate 5 denies every live assessment.
+     Closed by: a human signature. Nothing in this repository may produce one,
+     and a test asserts the signature table is still empty.
 
 1.3  Standing safety posture, all false and all deliberate:
-       scanner_execution_enabled = false
+       scanner_execution_enabled = false      (gate 1 denies)
        zap_adapter_enabled       = false
-       active_scan_enabled       = false
-       dual_control_available    = false  (effective: false)
-       llm_enabled               = false
-     Each is a separate, auditable decision. Enabling one does not enable
-     another.
+       active_scan_enabled       = false      (must stay false for M9)
+       dual_control effective    = false      (single operator)
+       llm_enabled               = false      (no provider key configured)
+
+1.4  M9 READINESS: 6 of 13 preconditions met. Outstanding:
+       host hygiene (gate 2b)   foreign 0.0.0.0:5433 listener  -> its owner
+       document signed          §7 signature table EMPTY       -> A HUMAN
+       grant signed+verified    document_state=unsigned_draft  -> admin, after
+       grant active             state=draft                    -> A SECOND PERSON
+       scanner execution        SCANNER_EXECUTION_ENABLED=false-> owner decision
+       ZAP adapter              ZAP_ADAPTER_ENABLED=false      -> owner decision
+       preflight dry run        4 gates denying
+     Run `make m9-readiness` for the live picture. Two of these are deliberately
+     not automatable: the signature, and activation by a different person.
 
 
 --------------------------------------------------------------------------------
 2. COVERAGE GAPS — what this build cannot tell you about the target
 --------------------------------------------------------------------------------
 
-Tier-1 summary (taxonomy 1.0.0, catalogue 1.1.0, rules 1.1.0, matrix 2.0.0):
+Tier-1 summary (taxonomy 1.0.0, catalogue 1.1.0, rules 1.2.0, matrix 2.0.0):
 
-   detects .......... 5 of 12   a rule pack can reach a verdict from evidence
-   partial .......... 1 of 12   some entries decidable, category needs more
-   surface only ..... 5 of 12   surface flagged, confirmation not possible here
-   no capability .... 1 of 12   nothing in this build can report it at all
+   detects ............ 5 of 12   a rule pack reaches a verdict from evidence
+   partial ............ 1 of 12   some entries decidable; the category needs more
+   surface only ....... 5 of 12   surface flagged; confirmation not possible here
+   no capability ...... 1 of 12   nothing in this build can report it at all
+   with findings ...... 7 of 12
 
 Per category (cat = catalogue entries, dec = entries a rule pack can decide,
 cand = flagged surfaces, find = stored findings):
 
   TIER 1
-  broken_access_control    critical  cat 2  dec 0  cand 3   find 0   SURFACE ONLY
-  authentication           critical  cat 1  dec 0  cand 3   find 0   SURFACE ONLY
-  session_management       critical  cat 4  dec 4  cand 5   find 3   detects
-  injection                critical  cat 2  dec 2  cand 8   find 2   partial
-  security_misconfig.      critical  cat 5  dec 5  cand 12  find 7   detects
-  cryptographic_failures   high      cat 3  dec 3  cand 16  find 0   detects
-  information_disclosure   high      cat 4  dec 4  cand 7   find 2   detects
-  file_upload              high      cat 1  dec 0  cand 2   find 0   SURFACE ONLY
-  api_security             high      cat 1  dec 0  cand 7   find 0   SURFACE ONLY
-  business_logic           high      cat 0  dec 0  cand 2   find 0   NO CAPABILITY
-  ssrf                     high      cat 1  dec 0  cand 1   find 0   SURFACE ONLY
-  client_side              high      cat 2  dec 2  cand 12  find 0   detects
+  broken_access_control    critical  cat 2  dec 0  cand  3  find 1  SURFACE ONLY
+  authentication           critical  cat 1  dec 0  cand  3  find 0  SURFACE ONLY
+  session_management       critical  cat 4  dec 4  cand  5  find 4  detects
+  injection                critical  cat 2  dec 2  cand  8  find 2  partial
+  security_misconfig.      critical  cat 5  dec 5  cand 12  find 7  detects
+  cryptographic_failures   high      cat 3  dec 3  cand 16  find 3  detects
+  information_disclosure   high      cat 4  dec 4  cand  7  find 4  detects
+  file_upload              high      cat 1  dec 0  cand  2  find 0  SURFACE ONLY
+  api_security             high      cat 1  dec 0  cand  7  find 0  SURFACE ONLY
+  business_logic           high      cat 0  dec 0  cand  2  find 0  NO CAPABILITY
+  ssrf                     high      cat 1  dec 0  cand  1  find 0  SURFACE ONLY
+  client_side              high      cat 2  dec 2  cand 12  find 2  detects
 
-  TIER 2 — all eight: no catalogue entries, no rules, no surfaces flagged.
+  TIER 2 — all eight remain: no catalogue entries, no rules, no surfaces.
   software_supply_chain, infrastructure_configuration, denial_of_service,
   http_protocol, error_handling, logging_monitoring, identity_management,
   privacy.
 
-2.1  Five Tier-1 categories are SURFACE ONLY. The platform identifies where
+2.1  FIVE Tier-1 categories are SURFACE ONLY. The platform identifies where
      they would apply and can say nothing about whether they are present.
-     Blocked by: active scanning disabled AND dual control unavailable.
-     These need crafted requests, which is intrusive by definition.
-       - broken access control (IDOR, privileged paths)
-       - authentication (enumeration, recovery flows)
-       - file upload (type/size/storage enforcement)
-       - API security (object-level authorisation, mass assignment)
-       - SSRF (caller-controlled fetch destinations)
+     Blocked by: active scanning disabled AND dual control unavailable. These
+     need crafted requests, which is intrusive by definition.
+       broken access control · authentication · file upload · API security · SSRF
+     This is an ORGANISATIONAL gap (two independent approvers), not an
+     engineering one.
 
 2.2  Injection is PARTIAL. Reflected XSS and SQLi are catalogued and the
-     reflected-input rule can confirm an unencoded reflection in HTML context.
-     Confirming that an interpreter was reached needs payloads. A clean
-     injection result here is not a clean injection result.
+     reflected-input rule confirms an unencoded reflection in HTML context.
+     Confirming an interpreter was reached needs payloads. A clean injection
+     result here is not a clean injection result.
 
-2.3  Business logic has NO CAPABILITY and never will have an automated one.
-     No scanner confirms a logic flaw. The matrix flags the surface (price,
-     quantity, coupon-shaped parameters) for a human and stops there.
+2.3  Business logic has NO CAPABILITY and never will have an automated one. No
+     scanner confirms a logic flaw. The matrix flags the surface (price,
+     quantity, coupon-shaped parameters) for a human and stops.
 
-2.4  Cryptographic failures and client-side show 0 findings despite 3 and 2
-     catalogue entries and a working rule pack. The fixtures simply do not
-     contain those detections yet. This is a FIXTURE gap, not a code gap.
+2.4  One finding carries no taxonomy category (an unmapped scanner rule). It is
+     counted and surfaced separately rather than hidden.
 
-2.5  One finding carries no taxonomy category (an unmapped scanner rule). It
-     is counted and surfaced separately rather than hidden.
-
-2.6  All of Tier 2 is catalogued-as-a-name only, by your sequencing. Denial of
+2.5  All of Tier 2 is catalogued-as-a-name only, by your sequencing. Denial of
      service is listed so it can be reported as excluded; it will never be run.
 
+2.6  (CLOSED since last edition) Cryptographic failures and client-side now
+     produce findings — 3 and 2 respectively — after the phase-8 fixture
+     expansion. The rule packs that already worked are now demonstrably
+     exercised.
+
 
 --------------------------------------------------------------------------------
-3. CAPABILITY GAPS — code that does not exist yet
+3. AI ANALYST GAPS — new, and only visible now that the transport is real
 --------------------------------------------------------------------------------
 
-3.1  Invariant I12 (purge is idempotent and halts on inconsistency) is the only
-     invariant still unimplemented. Due at phase 8.
+The agent is built, bounded and measured, but has spoken to NOTHING but a local
+test stand-in. Current: runner 2.0.0, prompts 2.0.0, catalogue 1.0.0,
+boundary 1.0.0, llm_enabled=false, no API key configured.
 
-3.2  Retention and purge are NOT implemented. The reference-aware deletion
-     guard exists and is tested (I7), but there is no scheduled purge run, no
-     RETENTION_ENABLED setting in config, and no halt-on-inconsistency
-     behaviour. Evidence accumulates indefinitely.
+3.1  NO REAL MODEL HAS EVER ANSWERED. Every proposal in the system came from a
+     deterministic stand-in that echoes its payload. Behaviour against a real
+     provider — refusals, drift, malformed output under load, latency — is
+     UNMEASURED. The harness to measure it exists (`make agent-eval`) and is
+     proven to detect a bad model (`make prove-agent-eval`); it has simply
+     never been pointed at a real one.
+     Closed by: an API key and the §3.2 decision.
 
-3.3  No rate limiting on the API. Scanner request budgets exist and are
-     enforced per job (requests/sec, total requests, duration); the HTTP API
-     itself has none.
+3.2  DECISION OUTSTANDING: reaching a real provider requires adding
+     `api.anthropic.com:443` to EGRESS_ALLOWLIST. That is a change to a
+     SECURITY BOUNDARY. The probes are already written to survive it (NET-K2
+     compares the allowlist against the CONFIGURED destination, not against a
+     hardcoded stand-in; NET-K5 catches a mismatch; NET-K2:posture records
+     which posture is in force), so the change does not weaken them — but it is
+     yours to make, not mine.
 
-3.4  Evidence is not encrypted at rest. Host full-disk encryption is assumed
-     and is NOT verified by the platform (assumption B7).
+3.3  NO Q&A. The catalogue has six PROPOSAL tools and no free-form question
+     path, so "answer analyst questions" is not yet possible. Needs a tool, an
+     endpoint, a dashboard input and the same citation enforcement.
 
-3.5  Dual control cannot be satisfied in a single-operator environment. Two
-     accounts held by one person are not independent approval, and the
-     platform says so rather than simulating it. Every intrusive profile is
-     therefore unreachable.
+3.4  NO COST CONTROLS. No per-run token budget, no daily cap. A full run is
+     ~10k in / 1.5k out (about 1.8 cents on Haiku 4.5), so this is cheap to
+     ignore today and should exist before a real key does.
 
-3.6  One asset only. Every screen operates on the first registered asset;
-     there is no asset switcher, and multi-asset coverage roll-up does not
-     exist.
+3.5  GROUNDEDNESS IS MEASURED CRUDELY. `agent_eval.py` catches invented paths,
+     headers and parameters — the hallucination that matters most in a report —
+     by lexical comparison against the evidence. It says nothing about whether
+     the reasoning is good, and the tool labels itself that way everywhere.
 
-3.7  One scanner. Nuclei, authenticated scanning, EPSS/KEV enrichment, a
+3.6  NO COMPARISON AGAINST ANALYST-REVIEWED GROUND TRUTH. Explanations have
+     never been scored against what a human analyst would have written.
+
+
+--------------------------------------------------------------------------------
+4. CAPABILITY GAPS — code that does not exist yet
+--------------------------------------------------------------------------------
+
+4.1  (CLOSED) Retention, purge and invariant I12 are implemented: reference-
+     aware, idempotent, and halting — every candidate is verified before any is
+     deleted, so an inconsistency deletes nothing. Off by default
+     (RETENTION_ENABLED=false); the API endpoint is dry-run unless asked.
+     Remaining: it has never run against genuinely aged data. The window is 90
+     days and nothing in the store is that old; every recorded run is a dry run
+     that found 0 eligible blobs, which is the honest answer.
+
+4.2  (CLOSED) API rate limiting exists: per-principal, reads and writes
+     separated, health exempt, with an in-process fallback so a Redis outage
+     never means NO limit. It protects availability, not a boundary, and is not
+     a defence against a distributed flood.
+
+4.3  Evidence is not encrypted at rest. Host full-disk encryption is assumed
+     and NOT verified by the platform (assumption B7).
+
+4.4  Dual control cannot be satisfied with one operator. Two accounts held by
+     one person are not independent approval, and the platform says so rather
+     than simulating it. Every intrusive profile is therefore unreachable.
+
+4.5  ONE ASSET. Every screen operates on the first registered asset; there is
+     no asset switcher and no multi-asset coverage roll-up.
+
+4.6  ONE SCANNER. Nuclei, authenticated scanning, EPSS/KEV enrichment, a
      platform priority score, multi-agent orchestration, a vector DB and
-     Kubernetes were all deliberately deferred in the MVP re-scope.
+     Kubernetes remain deliberately deferred.
 
-3.8  Authentication is a bearer token pasted into a form. No login flow, no
+4.7  AUTHENTICATION is a bearer token pasted into a form. No login flow, no
      session renewal, no logout-everywhere, no token rotation UI. Tokens are
      issued out of band by `make db-seed`.
 
-3.9  The dashboard is reached through an opt-in loopback forwarder, not a
-     published port, and is served over plain HTTP on 127.0.0.1. There is no
-     TLS anywhere in the application plane.
+4.8  NO TLS anywhere in the application plane. The dashboard is reached over
+     plain HTTP on a loopback-only forwarder, not a published port. (The agent's
+     outbound path does use TLS inside the CONNECT tunnel.)
 
-3.10 The agent is a bounded single pass, not a LangGraph graph. It has no
-     executable tools, so iteration buys nothing a second analyst request
-     would not. Revisit if tools that read more data are ever added.
+4.9  REPORT REGENERATION is deterministic over identical inputs only. There is
+     no report versioning and no diff between two reports.
 
 
 --------------------------------------------------------------------------------
-4. ASSURANCE GAPS — what is not being checked
+5. ASSURANCE GAPS — what is not being checked
 --------------------------------------------------------------------------------
 
-4.1  No CI pipeline. There is no .github/workflows; every suite is run by hand.
-     The invariant manifest test exists to catch a skipped safety test, but
-     nothing runs it automatically on a change.
+5.1  (CLOSED) CI exists (.github/workflows/ci.yml): lint, type check, the
+     invariant manifest, the code-only tests and the frontend build. It states
+     plainly that it CANNOT verify containment — only the machine running the
+     lab can — and the integration job is declared for a self-hosted runner and
+     disabled by default.
 
-4.2  No lint or type-check configuration. No ruff.toml, pyproject.toml or
-     mypy.ini. The frontend is type-checked only as part of its Docker build
-     (`npx tsc --noEmit`).
+5.2  (CLOSED) Ruff and mypy are configured and clean across 75 source files,
+     with mypy strict on the decision surfaces.
 
-4.3  No frontend tests at all. The dashboard is verified by running it and
-     looking, plus the backend's HTTP-level assertions about headers, the
-     auth-through-proxy behaviour and the bundle contents.
+5.3  NO FRONTEND TESTS. The dashboard is verified by running it and looking,
+     plus backend assertions about its headers, the auth-through-proxy
+     behaviour and the bundle contents. Eight screens, zero unit tests.
 
-4.4  The LLM stand-in is not a model. It returns deterministic canned
-     proposals shaped like model output. Behaviour against a real provider —
-     refusals, drift, malformed JSON under load, latency — is unmeasured. The
-     parser treats all model output as untrusted input, which is the mitigation.
+5.4  I12's two destructive cases are OPT-IN (`make test-retention`) and skip
+     with instructions otherwise. The registry records this so it cannot be
+     mistaken for full automatic coverage.
 
-4.5  The reflected-unencoded heuristic is exercised by two fixtures. A real
-     XSS corpus would test it far harder.
+5.5  The reflected-unencoded heuristic is exercised by a handful of fixtures. A
+     real XSS corpus would test it far harder.
 
-4.6  Rule coverage is five evidence classes (missing_header, header_value,
+5.6  Rule coverage is five evidence classes (missing_header, header_value,
      pattern_in_body, reflected_input, cookie_attribute). Anything else stays
-     `candidate` with the gap recorded, which reads as under-reporting and is
-     the intended direction of error.
+     `candidate` with the gap recorded — under-reporting, which is the intended
+     direction of error.
 
-4.7  Report regeneration is deterministic over identical inputs only. New
-     assessments change the content by design; there is no report versioning
-     or diff between two reports.
+5.7  The detection evaluation (19 cases, 0 FP, 0 FN) measures the pipeline
+     against CONSTRUCTED evidence whose ground truth is known by construction.
+     It establishes self-consistency, NOT real-world accuracy, and says so in
+     its own header.
 
 
 --------------------------------------------------------------------------------
-5. ENVIRONMENT GAPS — true of this machine, not of the design
+6. ENVIRONMENT GAPS — true of this machine, not of the design
 --------------------------------------------------------------------------------
 
-5.1  OPEN QUESTION FOR THE OWNER (docs/MVP_PLAN.md §5): should preflight gate 2
-     consume `host_hygiene_passed` as well as `isolation_passed`?
-     Context: PUB-2 found a host listener on 0.0.0.0:5433 belonging to
-     `corelayer-lab-db`, an unrelated project on this machine, which lab
-     containers can reach through the lab gateway. It is not ours to remove.
-     `make lab-check` fails loudly while it exists; the recovery path requires
-     containment only. Gate 2 currently reads isolation only.
-     This needs your decision, not an implementation.
+6.1  (DECIDED, ADR-0015) Gate 2 now requires containment AND host hygiene, kept
+     as separate verdicts. On this machine host hygiene FAILS: an unrelated
+     project (`corelayer-lab-db`) publishes 0.0.0.0:5433.
+     Measured: the lab cannot presently REACH it (TIMEOUT), while the host
+     gateway is reachable at L3 (ECONNREFUSED on :22). The verdict was NOT
+     changed on that basis — the drop is not a control this project owns.
+     Recorded as probes PUB-2R:<port> which move no verdict.
+     Closed by: its owner binding it to loopback. Another project's service was
+     not removed, stopped or modified, and no host firewall rule was added.
 
-5.2  `internal: true` is NOT host isolation. The host can reach container
-     addresses directly (measured deviation D20). Containment means container
-     -> internet and container -> LAN are blocked, which is verified by 115
-     probes plus an induced-failure proof.
+6.2  `internal: true` is NOT host isolation (deviation D20). The host can reach
+     container addresses directly. Containment means container->internet and
+     container->LAN are blocked, verified by 118 probes plus an induced-failure
+     proof.
 
-5.3  Docker silently ignores `ports:` on a container attached only to internal
-     networks (measured deviation D19). Nothing is published; the forwarders
+6.3  Docker silently ignores `ports:` on a container attached only to internal
+     networks (deviation D19). Nothing is published; the loopback forwarders
      are the deliberate alternative.
 
-5.4  PDF rendering depends on native libraries baked into the api image
+6.4  PDF rendering depends on native libraries baked into the api image
      (WeasyPrint + pydyf, both pinned after an unpinned pydyf broke it
-     silently). Where they are absent the artifact is recorded unavailable
-     with its reason rather than failing the report.
+     silently). Where absent, the artifact is recorded unavailable with its
+     reason rather than failing the report.
 
 
 --------------------------------------------------------------------------------
-6. WHAT IS NOT A GAP
+7. WHAT IS NOT A GAP
 --------------------------------------------------------------------------------
-
 Listed because they are easy to mistake for one:
 
   - Gate 5 denying every live assessment. That is the authorisation control
-    working.
+    working, and it now also verifies the document has not changed since it was
+    approved.
+  - Gate 2 denying on host hygiene. That is the ADR-0015 decision working.
   - Categories showing zero findings with `detects`. The rule pack works; the
     fixtures contain no such detection.
-  - `candidate` findings that were never confirmed. An unmapped scanner rule
-    is kept and surfaced rather than dropped.
+  - `candidate` findings never confirmed. An unmapped scanner rule is kept and
+    surfaced rather than dropped or guessed at.
   - `inconclusive` findings under partial coverage. Negative evidence is
     suppressed when collection was truncated; that is the soundness property.
-  - The agent refusing to send a payload. A refusal is the boundary working.
+  - The agent refusing to send a payload, or rejecting its own model's output.
+    Both are the boundary working, and rejections are stored deliberately.
+  - 50 generated reports and 99 fixture assessments in the database. That is
+    accumulated development history, not production data.
 
 
 --------------------------------------------------------------------------------
-7. SUGGESTED ORDER OF WORK
+8. SUGGESTED ORDER OF WORK
 --------------------------------------------------------------------------------
 
-  1. Your decision on gate 2 (§5.1) — blocks nothing, but should not drift.
-  2. Phase 8 hardening: retention purge + I12, rate limiting.
-  3. CI + lint/type configuration (§4.1, §4.2) — cheapest assurance available.
-  4. Fixture breadth for cryptographic failures and client-side (§2.4), so the
-     rule packs that already work are demonstrably exercised.
-  5. Everything in §2.1 stays blocked until there are two independent
-     approvers. That is an organisational gap, not an engineering one.
+  1. M9 — the first genuine passive assessment (§1.4). It needs your signature
+     first, then a second person, then the listener resolved. Everything else
+     on this list is less valuable until real scanner output has been through
+     the pipeline once.
+  2. Point the agent at a real model (§3.1-3.2) — one decision, then
+     `make agent-eval` turns the question into a table.
+  3. Cost controls before a real key gets heavy use (§3.4).
+  4. Frontend tests (§5.3) — eight screens, zero coverage, cheapest remaining
+     assurance after CI.
+  5. Q&A for the agent (§3.3), which is the capability your brief named and the
+     platform does not yet have.
+  6. Everything in §2.1 stays blocked until there are two independent
+     approvers. That is not an engineering problem.
 
 ================================================================================
-Verification state at generation: backend 228 passed / 4 skipped; invariants
-23 passed / 1 skipped (I12 pending P8); net_verify 115/115; lab+net 118 passed.
-ZAP daemon state: clean. Authorisation document: unsigned draft, untouched.
+Verification at generation: backend + invariants 282 passed / 3 skipped;
+lab + network 118 passed; net_verify 118/118 probes; 14 of 14 invariants have
+implemented tests; lint and type checks clean. ZAP daemon clean. Authorisation
+document: unsigned draft, untouched since 83497ce.
 ================================================================================
