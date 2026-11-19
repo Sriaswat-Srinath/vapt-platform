@@ -146,10 +146,33 @@ frontend-unpublish:          ## stop the dashboard forwarder
 	@if [ -f .lab-state/publish-frontend.pid ]; then kill $$(cat .lab-state/publish-frontend.pid) 2>/dev/null; \
 	  rm -f .lab-state/publish-frontend.pid; echo "stopped"; else echo "not running"; fi
 
+agent-eval:                  ## score whatever model the agent is pointed at
+	@./scripts/agent_eval.py --md docs/AGENT_MODEL_EVALUATION.md \
+	  --json .lab-state/agent-eval.json
+
+prove-agent-eval:            ## prove the eval DETECTS a bad model, then reverts
+	@LLM_ENABLED=true ANTHROPIC_API_KEY=sk-ant-standin-placeholder-000000000000 \
+	  docker compose -f docker-compose.yml up -d --force-recreate api >/dev/null
+	@STANDIN_MISBEHAVE=true docker compose -f docker-compose.yml up -d \
+	  --force-recreate llm-standin >/dev/null; sleep 6
+	@echo "--- with a deliberately bad model:"
+	@./scripts/agent_eval.py | grep -E 'malformed|schema_violations|uncited|ungrounded' || true
+	@docker compose -f docker-compose.yml up -d --force-recreate llm-standin >/dev/null; sleep 3
+	@echo "--- with the well-behaved stand-in:"
+	@./scripts/agent_eval.py | grep -E 'malformed|schema_violations|uncited|ungrounded' || true
+	@docker compose -f docker-compose.yml up -d --force-recreate api >/dev/null
+	@echo "LLM_ENABLED restored to its default (false)"
+
+standin-tls:                 ## generate the TEST-ONLY certificate for the LLM stand-in
+	@./scripts/standin_tls.sh
+
 test-agent:                  ## one agent run with LLM_ENABLED=true against the LOCAL stand-in
 	@# The stand-in is the only allowlisted destination and holds no credentials.
 	@# The flag is turned back off afterwards whatever the result.
-	@LLM_ENABLED=true docker compose -f docker-compose.yml up -d --force-recreate api >/dev/null
+	@# The key is a placeholder for the LOCAL stand-in, which ignores auth and
+	@# holds no credentials. A real provider key is never used here.
+	@LLM_ENABLED=true ANTHROPIC_API_KEY=sk-ant-standin-placeholder-000000000000 \
+	  docker compose -f docker-compose.yml up -d --force-recreate api >/dev/null
 	@sleep 9
 	@python3 -m pytest tests/backend/test_agent_phase6.py -q; status=$$?; \
 	  docker compose -f docker-compose.yml up -d --force-recreate api >/dev/null; \

@@ -20,7 +20,10 @@ def capabilities(p: Principal = Depends(require_role("analyst", "approver", "adm
     return {
         "llm_enabled": s.llm_enabled,
         "model": s.llm_model if s.llm_enabled else None,
-        "provider_host": s.llm_provider_host if s.llm_enabled else None,
+        "provider_host": (s.llm_base_url or "api.anthropic.com") if s.llm_enabled else None,
+        "api_key_configured": bool(s.anthropic_api_key),
+        "structured_output": s.llm_structured_output,
+        "max_output_tokens": s.llm_max_output_tokens,
         "egress": "CONNECT-only allowlisting proxy; the api has no direct route out",
         "runner_version": runner.RUNNER_VERSION,
         "prompt_version": runner.PROMPT_VERSION,

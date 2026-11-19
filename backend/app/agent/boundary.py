@@ -13,8 +13,9 @@ Three rules, enforced in code rather than in a prompt:
   I11  no plain hash of a secret value crosses. Correlation refs are keyed
        HMACs (`ref=hmac:<key_id>:…`); a bare hex digest of 32+ characters in an
        outbound payload is refused on sight.
-  --   nothing identifies this deployment: no tokens, no connection strings, no
-       internal addresses beyond the lab target the report already names.
+  --   nothing identifies this deployment: no platform tokens, no PROVIDER API
+       key (it belongs in a header, never in a payload), no connection strings,
+       no internal addresses beyond the lab target the report already names.
 
 A refusal here is a FAILURE of the caller, never a reason to send anyway.
 """
@@ -33,6 +34,7 @@ KEYED_REF = re.compile(r"ref=hmac:[A-Za-z0-9_.-]+:[A-Z2-7]+")
 # Deployment-identifying material that must never be described to a model.
 FORBIDDEN = (
     re.compile(r"vapt_[0-9a-f-]{8,}", re.I),                    # api tokens
+    re.compile(r"sk-ant-[A-Za-z0-9_-]{8,}"),                    # provider API keys
     re.compile(r"postgresql(\+\w+)?://", re.I),                  # connection strings
     re.compile(r"redis://", re.I),
     re.compile(r"\b172\.30\.(2[0-3])\.\d{1,3}\b"),               # application plane
@@ -92,12 +94,26 @@ def _walk(node: object, path: str = "$",
         yield path, key, node
 
 
+def _configured_secrets() -> tuple[str, ...]:
+    """Literal secret values this deployment holds. Belt and braces: the key is
+    sent as a header, so it should never appear in a payload at all — if it
+    somehow does, the request stops here rather than carrying it out."""
+    try:
+        from ..config import settings
+        s = settings()
+        return tuple(v for v in (s.anthropic_api_key, s.secret_key,
+                                 s.redis_password) if v and len(v) >= 12)
+    except Exception:                                   # noqa: BLE001 - never block on config
+        return ()
+
+
 def enforce(payload: dict) -> tuple[dict, BoundaryReport]:
     """Re-redact and verify. Returns the payload to send, or refuses.
 
     Pure: it does not send anything and has no I/O. The transport calls it and
     may not send a payload it has not been returned by this function.
     """
+    secrets = _configured_secrets()
     checked = re_redacted = refs = 0
     for path, key, value in _walk(payload):
         if not isinstance(value, str):
@@ -109,6 +125,11 @@ def enforce(payload: dict) -> tuple[dict, BoundaryReport]:
                 raise BoundaryRefusal(
                     "deployment-identifying material",
                     f"{path} contains a value matching {pattern.pattern!r}")
+        for secret in secrets:
+            if secret in value:
+                raise BoundaryRefusal(
+                    "deployment-identifying material",
+                    f"{path} contains a configured secret value verbatim")
         bare = BARE_DIGEST.search(value)
         if bare:
             raise BoundaryRefusal(

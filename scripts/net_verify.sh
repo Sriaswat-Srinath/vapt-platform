@@ -194,8 +194,17 @@ pxleak=$(docker inspect vapt_egress_proxy --format '{{range .Config.Env}}{{print
 add "NET-C:proxy" 0 "$pxleak" "$(eq "$pxleak" 0)" "proxy holds no application credentials"
 apiproxy=$(docker inspect vapt_api --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | grep -c '^HTTPS_PROXY=http://172.30.22.60:3128' || true)
 add "NET-C:api-proxy" 1 "$apiproxy" "$(eq "$apiproxy" 1)" "api is configured to egress ONLY via the proxy"
-apikey=$(docker inspect vapt_api --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | grep -icE 'API_KEY|ANTHROPIC|OPENAI' || true)
-add "NET-C:api-nocred" 0 "$apikey" "$(eq "$apikey" 0)" "no provider credential in the api environment"
+# Provider credentials. The api may hold ONE, and only while the agent is
+# enabled: a key present with the agent off is a credential lying around for no
+# reason. Any OTHER provider key is a failure outright. The worker may never
+# hold one (covered by NET-C:worker above) — it is on no egress network.
+apienv=$(docker inspect vapt_api --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null)
+anthropic_set=$(printf '%s' "$apienv" | grep -cE '^ANTHROPIC_API_KEY=.+' || true)
+other_keys=$(printf '%s' "$apienv" | grep -icE '^(OPENAI|GOOGLE|GEMINI|COHERE|MISTRAL|HUGGINGFACE)[A-Z_]*(API_)?KEY=.+' || true)
+api_llm_on=$(printf '%s' "$apienv" | grep -c '^LLM_ENABLED=true' || true)
+add "NET-C:api-nocred" 0 "$other_keys" "$(eq "$other_keys" 0)" "no third-party provider credential in the api environment"
+if [ "${anthropic_set:-0}" -gt 0 ] && [ "${api_llm_on:-0}" -eq 0 ]; then ok_key=false; else ok_key=true; fi
+add "NET-C:api-key-matches-posture" true "$ok_key" "$ok_key" "a provider key is present only while LLM_ENABLED=true (key=${anthropic_set:-0} llm_on=${api_llm_on:-0})"
 # The api must NOT hold the scanner control key: it has no route to vapt_lab and
 # must not drive the scanner. Scanner control belongs to the worker alone.
 apizap=$(docker inspect vapt_api --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | grep -cE '^ZAP_API_KEY=.+' || true)
@@ -331,24 +340,61 @@ allow_logged=$(docker logs vapt_egress_proxy 2>&1 | grep -c '"verdict": "allow"'
 add NET-J10b ">0" "$allow_logged" "$([ "${allow_logged:-0}" -gt 0 ] && echo true || echo false)" "proxy logged the permitted tunnel"
 # the proxy listens on its egress interface only
 r=$(tcp vapt_llm_standin "$PX_WAN" 3128); add NET-J11 ECONNREFUSED "$r" "$(eq "$r" ECONNREFUSED)" "WAN side cannot use the proxy (binds the egress interface only)"
-# no real provider in the test allowlist, and nothing public is reachable through it
+# === NET-K2..K5: egress destinations are EXACTLY what is configured =========
+# These probes used to hardcode the local stand-in. They now compare against
+# the destination the api is actually CONFIGURED to use, so they keep meaning
+# something if a real provider is ever introduced: the question is not "is it
+# the stand-in" but "is every permitted destination one the operator named".
+# Pointing at a real provider is a deliberate posture change, and K2's detail
+# records which posture is in force rather than hiding it.
+configured=$(docker inspect vapt_api --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
+  | sed -n 's|^LLM_BASE_URL=||p' | sed -e 's|^https\?://||' -e 's|/.*$||' | head -n1)
+case "$configured" in
+  *:*) : ;;
+  "")  configured="llm-standin:8443";;
+  *)   configured="$configured:443";;
+esac
+case "$configured" in
+  llm-standin:*) posture="LOCAL STAND-IN (no real provider is reachable)";;
+  *)             posture="EXTERNAL PROVIDER $configured — a deliberate posture change";;
+esac
+add "NET-K2:posture" "recorded" "$posture" true "the destination the agent is configured to use"
+
 al=$(docker inspect vapt_egress_proxy --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^EGRESS_ALLOWLIST=//p')
-bad=$(printf '%s' "$al" | tr ',' '\n' | grep -vc '^llm-standin:8443$' || true)
-add NET-K2 0 "$bad" "$(eq "$bad" 0)" "test allowlist contains ONLY the local stand-in (observed: ${al:-<empty>}) — the real provider is never contacted"
+bad=$(printf '%s' "$al" | tr ',' '\n' | sed '/^$/d' | grep -vcx "$configured" || true)
+add NET-K2 0 "$bad" "$(eq "$bad" 0)" "the proxy allowlist contains ONLY the configured destination $configured (observed: ${al:-<empty>}) — nothing else can be contacted"
+
+# The api must be pointed at something the proxy would actually permit. A
+# mismatch fails safe (the proxy refuses), but it is a misconfiguration and
+# should be visible rather than showing up as a mysterious 403.
+case ",$al," in *",$configured,"*) match=true;; *) match=false;; esac
+add NET-K5 true "$match" "$match" "the agent's configured destination $configured is in the proxy allowlist"
+
 # Non-contact is proven from the proxy's own decision log, not from DNS:
 # resolution is not contact, and the proxy legitimately has a resolver. Every
-# ALLOW must name the stand-in; an allow for anything else would be a contact.
-foreign=$(docker logs vapt_egress_proxy 2>&1 | python3 -c "
-import json,sys
+# ALLOW must name an allowlisted destination; an allow for anything else would
+# be a contact with something nobody authorised.
+foreign=$(docker logs vapt_egress_proxy 2>&1 | ALLOWED="$al" python3 -c "
+import json,os,sys
+allowed={d.strip().lower() for d in os.environ.get('ALLOWED','').split(',') if d.strip()}
 bad=0
 for ln in sys.stdin:
     ln=ln.strip()
     if not ln.startswith('{'): continue
     try: e=json.loads(ln)
     except ValueError: continue
-    if e.get('verdict') in ('allow','closed') and e.get('destination','').lower()!='llm-standin:8443': bad+=1
+    if e.get('verdict') in ('allow','closed') and e.get('destination','').lower() not in allowed: bad+=1
 print(bad)" 2>/dev/null || echo PROBE_ERROR)
-add NET-K3 0 "$foreign" "$(eq "$foreign" 0)" "proxy log shows no permitted tunnel to any destination other than the local stand-in — the real provider was never contacted"
+add NET-K3 0 "$foreign" "$(eq "$foreign" 0)" "proxy log shows no permitted tunnel to any destination outside the allowlist"
+
+# Every permitted tunnel resolved to the same address the allowlisted
+# destination resolves to now. A difference is DNS drift or a redirected
+# destination, both of which are worth stopping for.
+expected_ips=$(docker exec vapt_egress_proxy python3 -c "
+import socket,sys
+host='${configured%%:*}'
+try: print(','.join(sorted({i[4][0] for i in socket.getaddrinfo(host,None)})))
+except OSError: print('UNRESOLVED')" 2>/dev/null || echo PROBE_ERROR)
 resolved_to=$(docker logs vapt_egress_proxy 2>&1 | python3 -c "
 import json,sys
 ips=set()
@@ -359,7 +405,11 @@ for ln in sys.stdin:
     except ValueError: continue
     if e.get('verdict')=='allow': ips.update(e.get('resolved',[]))
 print(','.join(sorted(ips)) or 'NONE')" 2>/dev/null || echo PROBE_ERROR)
-add NET-K4 "172.30.23.70" "$resolved_to" "$(eq "$resolved_to" "172.30.23.70")" "every permitted tunnel resolved to the local stand-in address only"
+case "$resolved_to" in
+  NONE) k4=true;;                       # nothing tunnelled yet is not a failure
+  *)    [ "$resolved_to" = "$expected_ips" ] && k4=true || k4=false;;
+esac
+add NET-K4 "$expected_ips" "$resolved_to" "$k4" "every permitted tunnel resolved to the address the allowlisted destination resolves to"
 
 # ============================ verdict ========================================
 net_passed=true

@@ -52,13 +52,32 @@ class Settings(BaseSettings):
     # Disabled by default. Enabling it grants the agent nothing but the ability
     # to be ASKED: it proposes from a fixed catalogue and sets no state.
     llm_enabled: bool = False
-    llm_provider_host: str = "llm-standin"          # test stand-in by default
-    llm_provider_port: int = 8443
-    llm_path: str = "/v1/messages"
-    llm_model: str = "stand-in"
-    llm_proxy_url: str = "http://172.30.22.60:3128"  # the ONLY route out
+    # The model. Haiku 4.5 is the configured default: the per-tool prompts are
+    # 400-1200 tokens, the output is short structured JSON, and the platform
+    # validates everything it returns, so the task does not need a larger model.
+    # NOTE: Haiku 4.5 has no `effort` setting — sending one is an error — and
+    # takes an explicit thinking budget rather than adaptive thinking.
+    llm_model: str = "claude-haiku-4-5"
+    llm_max_output_tokens: int = 4096
+    llm_thinking_budget_tokens: int = 0        # 0 = no thinking; >=1024 to enable
+    llm_structured_output: bool = True
+    llm_max_retries: int = 1
+    # Empty = the SDK's default (https://api.anthropic.com). Pointed at the
+    # local stand-in for tests, which speaks the Messages API shape over HTTP.
+    llm_base_url: str = "https://llm-standin:8443"
+    # Trust anchor for the TEST stand-in. Unset for a real provider, which is
+    # verified against the system trust store.
+    llm_ca_bundle: str | None = None
+    # The ONLY route out. The api has no default route of its own.
+    llm_proxy_url: str = "http://172.30.22.60:3128"
+    # Never defaulted, never logged, never placed in a payload: it travels as an
+    # SDK header. The stage-2 boundary refuses any payload containing it.
+    anthropic_api_key: str | None = None
     llm_max_findings: int = 25
-    llm_timeout_seconds: int = 30
+    # How many findings get an explanation + remediation pair. Each is two
+    # requests, so this is the main cost dial.
+    llm_max_explanations: int = 5
+    llm_timeout_seconds: int = 60
 
     # ---- retention (phase 8) -----------------------------------------------
     # Purge deletes UNREDACTED BLOBS only, and only when nothing references

@@ -16,6 +16,10 @@ import pytest
 REPO = pathlib.Path(__file__).parents[2]
 sys.path.insert(0, str(REPO / "backend"))
 os.environ.setdefault("REDACTION_HMAC_KEY", "0" * 64)
+# Settings requires these; nothing here connects to either. The agent client is
+# exercised for what it BUILDS, never for what it sends.
+os.environ.setdefault("SECRET_KEY", "test-secret-key-not-used-for-anything")
+os.environ.setdefault("DATABASE_URL", "postgresql+psycopg://unused:unused@127.0.0.1:1/unused")
 from app import taxonomy as tax                                     # noqa: E402
 from app.agent import boundary, parsing, tools                      # noqa: E402
 from app.evidence import redaction                                  # noqa: E402
@@ -206,6 +210,41 @@ def test_agent_capabilities_states_what_it_cannot_do():
     assert "advisory" in body["note"]
 
 
+def test_the_per_tool_prompts_are_small_and_focused(asset_id):
+    """v2 asks several small questions instead of one enormous one. The point
+    of the refactor is measurable: no single prompt may carry the whole world."""
+    from app.agent import prompts as p
+    finding = {"id": "real-id", "title": "CSP header not set",
+               "category": "security_misconfiguration", "validation_state": "confirmed",
+               "severity": "medium", "coverage_complete": True,
+               "affected_url": "http://h:3000/login", "parameter_name": None,
+               "catalogue_key": "missing-security-header-csp"}
+    built = [p.explain_finding("f1", finding, ["HTTP/1.1 200 OK"]),
+             p.suggest_remediation("f1", finding, ["HTTP/1.1 200 OK"], "set a header"),
+             p.map_unmapped_detection("f1", finding, ["HTTP/1.1 200 OK"])]
+    for prompt in built:
+        size = len(json.dumps(p.as_request(prompt))) + len(prompt.system)
+        assert size < 8000, f"{prompt.tool} prompt is {size} bytes — the point was to shrink it"
+        assert "treat it as" in prompt.system.lower(), \
+            f"{prompt.tool} does not tell the model the evidence is data, not instructions"
+        assert "do not decide" in prompt.system.lower()
+
+
+def test_a_prompt_only_carries_handles_it_asks_about(asset_id):
+    """Handles are scoped to ONE request, so a model cannot cite a finding it
+    was not given in that request."""
+    from app.agent import prompts as p
+    finding = {"id": "real-id", "title": "t", "category": "injection",
+               "validation_state": "confirmed", "severity": "high",
+               "coverage_complete": True, "affected_url": "http://h/x",
+               "parameter_name": "q", "catalogue_key": "reflected-xss"}
+    prompt = p.explain_finding("f1", finding, [])
+    assert set(prompt.handles) == {"f1"}
+    assert prompt.handles["f1"] == "real-id"
+    assert "real-id" not in json.dumps(p.as_request(prompt)), \
+        "a platform identifier reached the payload"
+
+
 def test_an_agent_run_is_recorded_even_when_the_agent_is_disabled(asset_id):
     status, body = call("POST", f"/assets/{asset_id}/agent/runs")
     assert status == 201, body
@@ -280,7 +319,7 @@ def test_live_run_reaches_the_standin_through_the_proxy(asset_id):
     status, body = call("POST", f"/assets/{asset_id}/agent/runs")
     assert status == 201, body
     assert body["state"] == "completed", body["error"]
-    assert body["provider_host"].startswith("llm-standin"), \
+    assert "llm-standin" in body["provider_host"], \
         "the agent must only ever reach the local stand-in in tests"
     assert body["bytes_sent"] > 0 and body["bytes_received"] > 0
     assert body["proposals"], "the stand-in returns proposals; none were accepted"
@@ -292,7 +331,82 @@ def test_live_run_never_contacts_a_real_provider(asset_id):
     if not _enabled():
         pytest.skip("LLM_ENABLED is false (the default). Run `make test-agent`.")
     status, caps = call("GET", "/agent/capabilities")
-    assert caps["provider_host"] == "llm-standin", caps
+    assert "llm-standin" in (caps["provider_host"] or ""), caps
     _, runs = call("GET", f"/assets/{asset_id}/agent/runs")
     hosts = {r["provider_host"] for r in runs if r["provider_host"]}
-    assert hosts <= {"llm-standin:8443"}, f"a run reached {hosts}"
+    foreign = [h for h in hosts if "llm-standin" not in h]
+    assert not foreign, f"a run reached {foreign}"
+
+
+# ============================== v2: real transport and model evaluation ======
+def test_the_client_never_builds_without_a_key():
+    """No key means no SDK client, not a silent unauthenticated attempt."""
+    from app.agent import client as c
+    import app.config as cfg
+    cfg.settings.cache_clear()
+    old = os.environ.pop("ANTHROPIC_API_KEY", None)
+    try:
+        cfg.settings.cache_clear()
+        with pytest.raises(c.LlmRefused) as exc:
+            c._build_client()                                   # noqa: SLF001
+        assert "no provider API key" in str(exc.value)
+    finally:
+        if old is not None:
+            os.environ["ANTHROPIC_API_KEY"] = old
+        cfg.settings.cache_clear()
+
+
+def test_haiku_requests_never_carry_an_effort_setting():
+    """`output_config.effort` is an ERROR on Haiku 4.5. The request builder must
+    not send one, whatever else it sends."""
+    from app.agent import client as c
+    kwargs = c._request_kwargs("sys", {"task": "explain_finding"}, structured=True)  # noqa: SLF001
+    assert "effort" not in json.dumps(kwargs)
+    assert kwargs["model"], "a model must always be named"
+    thinking = kwargs.get("thinking")
+    if thinking:
+        assert thinking["type"] == "enabled", \
+            "Haiku 4.5 takes an explicit thinking budget, not the adaptive form"
+        assert thinking["budget_tokens"] >= 1024
+
+
+def test_the_response_schema_forbids_extra_fields():
+    """The schema the provider is asked to honour must match what the platform's
+    own validator will accept, or the two disagree silently."""
+    from app.agent.client import RESPONSE_SCHEMA
+    item = RESPONSE_SCHEMA["properties"]["proposals"]["items"]
+    assert item["additionalProperties"] is False
+    assert set(item["required"]) == {"tool", "arguments"}
+
+
+def test_the_api_key_itself_can_never_cross_the_boundary():
+    from app.agent import boundary as b
+    assert not b.is_safe({"note": "sk-ant-api03-AAAABBBBCCCCDDDDEEEEFFFF"})
+
+
+def test_the_eval_harness_catches_each_failure_mode_it_claims_to():
+    """The harness is only worth having if it can FAIL. Each check is exercised
+    against output that should trip it."""
+    sys.path.insert(0, str(REPO / "scripts"))
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "agent_eval", REPO / "scripts" / "agent_eval.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    vocab = mod.VOCABULARY | mod._platform_vocabulary()          # noqa: SLF001
+    evidence = json.dumps({"affected_url": "http://shop.test:3000/login",
+                           "parameter_name": "q"})
+    # Hallucinated identifiers must be caught.
+    ok, invented = mod.grounded(
+        "The /admin/debug.jsp endpoint leaks X-Internal-Trace via report_v2.aspx.",
+        evidence, vocab)
+    assert not ok and invented, "a hallucinated path/header was not detected"
+    # Ordinary prose must NOT be caught.
+    ok, invented = mod.grounded(
+        "The response does not set the header, so a browser applies no policy. "
+        "Re-assess after the change to confirm.", evidence, vocab)
+    assert ok, f"prose was flagged as hallucination: {invented}"
+    # The platform's own vocabulary must not be caught.
+    ok, invented = mod.grounded("This belongs to broken_access_control.", evidence, vocab)
+    assert ok, f"a taxonomy key was flagged as invented: {invented}"

@@ -19,3 +19,6 @@ weasyprint==62.3
 pydyf==0.10.0
 cssselect2==0.7.0
 tinycss2==1.3.0
+# Messages API client; the ONLY outbound model path (agent/client.py). Pinned
+# like every other dependency so a rebuild cannot silently change the client.
+anthropic==1.17.0
