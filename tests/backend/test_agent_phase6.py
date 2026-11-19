@@ -89,7 +89,7 @@ def test_i11_keyed_refs_are_permitted_because_they_are_not_hashes_of_the_value()
 
 
 @pytest.mark.parametrize("secret", [
-    "vapt_01a1ed41-8e41-7b44-8c66-e2559777e204_abcdefghijklmnop",
+    "vapt_00000000-0000-0000-0000-000000000000_notarealtokenvalue",
     "postgresql+psycopg://vapt:password@172.30.21.40:5432/vapt",
     "redis://:password@172.30.21.50:6379/0",
     "the api is at 172.30.20.20",
