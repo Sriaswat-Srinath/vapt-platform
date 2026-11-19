@@ -86,6 +86,14 @@ class GrantCreate(BaseModel):
     valid_until: dt.datetime | None = None
 
 
+class AuthorisationAttestationIn(BaseModel):
+    """The operator's measurement of an authorisation document on disk."""
+    document_ref: str = Field(min_length=1, max_length=300)
+    document_sha256: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    byte_size: int | None = Field(default=None, ge=0)
+    note: str | None = None
+
+
 class GrantVerifyDocument(BaseModel):
     document_sha256: str = Field(min_length=64, max_length=64)
     signed: bool

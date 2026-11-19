@@ -105,6 +105,56 @@ def create_grant(asset_id: str, payload: schemas.GrantCreate,
     return grant
 
 
+@router.post("/authorisation-documents/attest", status_code=201)
+def attest_document(payload: schemas.AuthorisationAttestationIn,
+                    session: Session = Depends(get_session),
+                    p: Principal = Depends(require_role("admin")),
+                    trace: str = Depends(trace_id)):
+    """Report the CURRENT digest of an authorisation document. Admin only.
+
+    The platform never reads the host filesystem — the operator measures and
+    reports, exactly as for the lab isolation check. Gate 5 compares this
+    against the digest recorded on the grant, so editing a signed document
+    after approval stops scanning instead of silently changing its scope.
+    """
+    row = models.AuthorisationAttestation(
+        document_ref=payload.document_ref, document_sha256=payload.document_sha256,
+        byte_size=payload.byte_size, note=payload.note, attested_by=p.analyst.id)
+    session.add(row)
+    grants = session.execute(select(models.ScopeGrant).where(
+        models.ScopeGrant.document_ref == payload.document_ref)).scalars().all()
+    mismatched = [str(g.id) for g in grants
+                  if g.document_sha256 and g.document_sha256 != payload.document_sha256]
+    audit.record(session, action="authorisation_document_attested", actor_kind="human",
+                 actor_id=p.id, outcome="mismatch" if mismatched else "ok",
+                 subject_type="authorisation_document", trace_id=trace,
+                 detail={"document_ref": payload.document_ref,
+                         "document_sha256": payload.document_sha256,
+                         "grants_with_a_different_digest": mismatched})
+    session.commit()
+    return {"id": str(row.id), "document_ref": row.document_ref,
+            "document_sha256": row.document_sha256, "attested_at": row.attested_at,
+            "grants_with_a_different_digest": mismatched,
+            "note": ("this digest matches every grant for the document"
+                     if not mismatched else
+                     "the document differs from what those grants were approved against; "
+                     "gate 5 will deny until they are re-verified and re-approved")}
+
+
+@router.get("/authorisation-documents/attestations")
+def list_attestations(document_ref: str | None = None, limit: int = 20,
+                      session: Session = Depends(get_session),
+                      p: Principal = Depends(require_role("analyst", "approver", "admin"))):
+    stmt = select(models.AuthorisationAttestation).order_by(
+        models.AuthorisationAttestation.attested_at.desc()).limit(min(limit, 100))
+    if document_ref:
+        stmt = stmt.where(models.AuthorisationAttestation.document_ref == document_ref)
+    return [{"id": str(r.id), "document_ref": r.document_ref,
+             "document_sha256": r.document_sha256, "byte_size": r.byte_size,
+             "attested_at": r.attested_at, "note": r.note}
+            for r in session.execute(stmt).scalars().all()]
+
+
 @router.post("/scope-grants/{grant_id}/verify-document", response_model=schemas.GrantOut)
 def verify_document(grant_id: str, payload: schemas.GrantVerifyDocument,
                     session: Session = Depends(get_session),

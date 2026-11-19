@@ -1,0 +1,120 @@
+{
+  "_comment": [
+    "Ground truth for the FIRST GENUINE PASSIVE ASSESSMENT (M9), step 10:",
+    "'compare the output against independently known vulnerabilities in the lab'.",
+    "",
+    "Source of truth: OWASP Juice Shop is a deliberately vulnerable training application whose",
+    "weaknesses are published by its own project. The expectations below are limited to what a",
+    "PASSIVE scan can observe — response headers, cookie attributes, served content and transport.",
+    "They are NOT the Juice Shop challenge list: most of those challenges require active testing,",
+    "which M9 does not perform.",
+    "",
+    "HOW TO USE THIS: after the live assessment completes, run",
+    "  scripts/m9_compare.py --job <id>",
+    "which reports expected-and-found, expected-and-missed (recall gaps) and found-but-unexpected",
+    "(candidates for review — they may be real, or they may be false positives worth a rule).",
+    "",
+    "An expectation being missed is NOT automatically a defect: it may mean the crawl did not reach",
+    "the page, the budget was exhausted, or the deployment differs. The comparison report asks that",
+    "question rather than answering it."
+  ],
+  "dataset_version": "1.0.0",
+  "target": {
+    "asset_identifier": "MOCK-WEB-001",
+    "application": "OWASP Juice Shop",
+    "mode": "live",
+    "profile": "zap-passive",
+    "observable_by": "passive observation only — no payloads, no active scanner"
+  },
+  "expectations": [
+    {
+      "id": "GT-01", "category": "security_misconfiguration",
+      "expectation": "No Content-Security-Policy on HTML responses",
+      "confidence": "high",
+      "basis": "Juice Shop ships no CSP by default; observable on any rendered page",
+      "catalogue_key": "missing-security-header-csp"
+    },
+    {
+      "id": "GT-02", "category": "security_misconfiguration",
+      "expectation": "No X-Content-Type-Options: nosniff",
+      "confidence": "high", "basis": "default deployment sets no nosniff header",
+      "catalogue_key": "missing-security-header-content-type-options"
+    },
+    {
+      "id": "GT-03", "category": "security_misconfiguration",
+      "expectation": "No anti-clickjacking header (X-Frame-Options / frame-ancestors)",
+      "confidence": "medium", "basis": "default deployment does not frame-protect",
+      "catalogue_key": "missing-security-header-frame-options"
+    },
+    {
+      "id": "GT-04", "category": "cryptographic_failures",
+      "expectation": "No Strict-Transport-Security",
+      "confidence": "high",
+      "basis": "the lab serves plain HTTP; HSTS is absent and may validate as not_applicable",
+      "catalogue_key": "missing-security-header-hsts"
+    },
+    {
+      "id": "GT-05", "category": "cryptographic_failures",
+      "expectation": "Credentials submitted over cleartext HTTP",
+      "confidence": "high",
+      "basis": "the lab target is HTTP-only and exposes a login form",
+      "catalogue_key": "cleartext-credential-transmission"
+    },
+    {
+      "id": "GT-06", "category": "cryptographic_failures",
+      "expectation": "Authentication token kept in browser storage",
+      "confidence": "medium",
+      "basis": "Juice Shop stores its JWT client-side; observable in served JavaScript",
+      "catalogue_key": "sensitive-data-in-client-storage"
+    },
+    {
+      "id": "GT-07", "category": "information_disclosure",
+      "expectation": "Server/framework version disclosed (Express)",
+      "confidence": "medium", "basis": "X-Powered-By is commonly present on default Express apps",
+      "catalogue_key": "server-version-disclosure"
+    },
+    {
+      "id": "GT-08", "category": "information_disclosure",
+      "expectation": "Timestamps disclosed in API responses",
+      "confidence": "medium", "basis": "product and feedback APIs return createdAt/updatedAt",
+      "catalogue_key": "timestamp-disclosure"
+    },
+    {
+      "id": "GT-09", "category": "session_management",
+      "expectation": "Cookie set without one or more of HttpOnly / SameSite",
+      "confidence": "medium",
+      "basis": "Juice Shop sets a language/session cookie with minimal attributes",
+      "catalogue_key": "cookie-missing-httponly"
+    },
+    {
+      "id": "GT-10", "category": "broken_access_control",
+      "expectation": "Forms served without an anti-CSRF token",
+      "confidence": "medium",
+      "basis": "a SPA with token auth typically carries no CSRF token in forms",
+      "catalogue_key": "missing-anti-csrf-token",
+      "note": "expected to validate as candidate: no passive rule can confirm a CSRF weakness"
+    },
+    {
+      "id": "GT-11", "category": "client_side",
+      "expectation": "Third-party script loaded without Subresource Integrity",
+      "confidence": "low",
+      "basis": "depends on the build; recorded so its absence is noticed either way",
+      "catalogue_key": "subresource-without-integrity"
+    },
+    {
+      "id": "GT-12", "category": "api_security",
+      "expectation": "REST endpoints discovered under /rest and /api",
+      "confidence": "high",
+      "basis": "Juice Shop's API surface; expected as attack-surface inventory, not as findings",
+      "catalogue_key": null,
+      "surface_only": true
+    }
+  ],
+  "not_expected_passively": [
+    "SQL injection on the login form — requires payloads (active)",
+    "Reflected or stored XSS — requires payloads (active)",
+    "IDOR on basket or user objects — requires two accounts and crafted requests",
+    "Broken authentication / weak passwords — credential guessing is out of scope entirely",
+    "Business logic flaws (coupon, quantity, price) — no scanner confirms these"
+  ]
+}

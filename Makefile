@@ -182,5 +182,18 @@ test-retention:              ## I12: purge idempotence and halting, with real bl
 	  docker compose -f docker-compose.yml up -d --force-recreate api >/dev/null; \
 	  echo "RETENTION_ENABLED restored to its default (false)"; exit $$status
 
+m9-readiness:                ## what remains before the first genuine passive assessment
+	@./scripts/m9_readiness.py --json .lab-state/m9-readiness.json
+
+m9-compare:                  ## compare findings against independently known weaknesses
+	@./scripts/m9_compare.py $(if $(JOB),--job $(JOB),) \
+	  --md docs/M9_GROUND_TRUTH_COMPARISON.md --json .lab-state/m9-comparison.json
+
+prove-authorisation-tamper:  ## prove an edited authorisation document stops the gate chain
+	@./scripts/prove_authorisation_tamper.sh
+
+attest-authorisation:        ## report the authorisation document's current digest (gate 5)
+	@./scripts/attest_authorisation.sh $(DOC)
+
 isolation-report:            ## run lab-check and report the result to the API (admin)
 	@./scripts/report_isolation.sh

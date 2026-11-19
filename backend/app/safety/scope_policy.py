@@ -21,7 +21,8 @@ import datetime as dt
 import ipaddress
 from typing import Callable
 
-POLICY_VERSION = "1.1.0"   # 1.1.0: gate 2 requires host hygiene as well as containment (ADR-0015)
+POLICY_VERSION = "1.2.0"   # 1.1.0 gate 2 host hygiene (ADR-0015); 1.2.0 gate 5 verifies
+                           # the authorisation document digest against a fresh attestation
 
 
 @dc.dataclass(frozen=True, slots=True)
@@ -36,6 +37,11 @@ class GrantSnapshot:
     valid_from: dt.datetime | None
     valid_until: dt.datetime | None
     revoked_at: dt.datetime | None
+    # The document this grant was approved against, and its digest AT APPROVAL.
+    # Gate 5 compares that digest with the operator's latest attestation, so an
+    # edit to a signed document stops scanning instead of changing its meaning.
+    document_ref: str | None = None
+    document_sha256: str | None = None
 
 
 @dc.dataclass(frozen=True, slots=True)
@@ -114,6 +120,13 @@ class ScopeRequest:
     asset_environment: str | None = None
     asset_hostname: str | None = None
     asset_port: int | None = None
+
+    # The operator's most recent report of the authorisation document's CURRENT
+    # digest, and when it was taken. Gate 5 compares it with the digest recorded
+    # on the grant: a document edited after activation must stop scanning.
+    attested_document_sha256: str | None = None
+    attested_document_at: dt.datetime | None = None
+    attestation_ttl_minutes: int = 1440
 
     # grant / profile / approval
     grant: GrantSnapshot | None = None
@@ -248,6 +261,29 @@ def _g5(r: ScopeRequest) -> GateResult:
         return GateResult("grant_active", False, "scope grant is not yet valid")
     if g.valid_until is not None and r.now >= g.valid_until:
         return GateResult("grant_active", False, "scope grant has expired")
+    # The document's integrity, not just its state. A signed document that has
+    # been edited since activation is no longer the document that was signed.
+    if not g.document_sha256:
+        return GateResult("grant_active", False,
+                          "the grant records no document digest, so the authorisation it rests "
+                          "on cannot be verified")
+    if r.attested_document_sha256 is None:
+        return GateResult("grant_active", False,
+                          f"no current digest has been attested for {g.document_ref}; run "
+                          "`make attest-authorisation` so the signed document can be verified")
+    if r.attested_document_sha256 != g.document_sha256:
+        return GateResult("grant_active", False,
+                          f"the authorisation document has CHANGED since it was approved: the "
+                          f"grant records {g.document_sha256[:12]}… and the attested file is "
+                          f"{r.attested_document_sha256[:12]}…. Re-verify and re-approve it; "
+                          "scanning stays denied until then")
+    if r.attested_document_at is None:
+        return GateResult("grant_active", False, "the document attestation has no timestamp")
+    age = (r.now - r.attested_document_at).total_seconds() / 60.0
+    if age > r.attestation_ttl_minutes:
+        return GateResult("grant_active", False,
+                          f"the document attestation is {int(age)} minutes old (limit "
+                          f"{r.attestation_ttl_minutes}); re-attest before executing")
     return GateResult("grant_active", True)
 
 

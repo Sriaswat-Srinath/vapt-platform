@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     suppress_negative_evidence_on_partial_coverage: bool = True
 
     lab_subnet: str = "172.30.10.0/24"
+    # How long an authorisation-document digest attestation stays usable. The
+    # document is the authority for a live scan, so its integrity is re-checked
+    # rather than assumed to hold indefinitely.
+    authorisation_attestation_ttl_minutes: int = 1440
 
     # ---- the agent (L3, advisory only) -------------------------------------
     # Disabled by default. Enabling it grants the agent nothing but the ability

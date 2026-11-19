@@ -219,6 +219,25 @@ class LabIsolationCheck(Base):
     created_at: Mapped[dt.datetime] = _now()
 
 
+class AuthorisationAttestation(Base):
+    """An operator's report of the CURRENT digest of an authorisation document.
+
+    The platform never reads the host filesystem (same reason as the isolation
+    check): the operator measures and reports. Gate 5 compares the grant's
+    recorded `document_sha256` against the most recent attestation, so an edit
+    to a signed document after activation stops scanning instead of silently
+    widening scope — which is exactly what the document itself promises.
+    """
+    __tablename__ = "authorisation_attestations"
+    id: Mapped[Any] = _pk()
+    document_ref: Mapped[str] = mapped_column(String(300), nullable=False)
+    document_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    byte_size: Mapped[int | None] = mapped_column(Integer)
+    note: Mapped[str | None] = mapped_column(Text)
+    attested_at: Mapped[dt.datetime] = _now()
+    attested_by: Mapped[Any | None] = mapped_column(UUID(as_uuid=True), ForeignKey("analysts.id"))
+
+
 class ScopeDecision(Base):
     """Every preflight evaluation, allow or deny, is persisted."""
     __tablename__ = "scope_decisions"

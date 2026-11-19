@@ -133,6 +133,15 @@ def build_scope_request(session: Session, *, asset: models.Asset | None, profile
             asset_stmt = asset_stmt.where(models.ScanJob.id != exclude_job_id)
         in_flight_asset = int(session.execute(asset_stmt).scalar_one())
 
+    grant_row = active_grant(session, asset.id) if asset is not None else None
+    attestation = None
+    if grant_row is not None and grant_row.document_ref:
+        attestation = session.execute(
+            select(models.AuthorisationAttestation)
+            .where(models.AuthorisationAttestation.document_ref == grant_row.document_ref)
+            .order_by(models.AuthorisationAttestation.attested_at.desc())
+            .limit(1)).scalar_one_or_none()
+
     return sp.ScopeRequest(
         now=now, subject_type=subject_type, mode=mode, target_url_path=path,
         target_method=method,
@@ -141,6 +150,9 @@ def build_scope_request(session: Session, *, asset: models.Asset | None, profile
         dual_control_available_flag=s.dual_control_available,
         attested_distinct_active_identities=attested_identity_count(session),
         dual_control_min_identities=s.dual_control_min_identities,
+        attested_document_sha256=(attestation.document_sha256 if attestation else None),
+        attested_document_at=(attestation.attested_at if attestation else None),
+        attestation_ttl_minutes=s.authorisation_attestation_ttl_minutes,
         isolation_passed=(iso.isolation_passed if iso else None),
         host_hygiene_passed=(iso.host_hygiene_passed if iso else None),
         host_wildcard_listeners=(iso.host_wildcard_listeners if iso else None),
@@ -152,6 +164,7 @@ def build_scope_request(session: Session, *, asset: models.Asset | None, profile
         asset_port=asset.port if asset else None,
         grant=(sp.GrantSnapshot(
             id=str(grant.id), state=grant.state, document_state=grant.document_state,
+            document_ref=grant.document_ref, document_sha256=grant.document_sha256,
             allowed_cidrs=tuple(grant.allowed_cidrs or ()),
             allowed_ports=tuple(grant.allowed_ports or ()),
             allowed_profiles=tuple(grant.allowed_profiles or ()),
