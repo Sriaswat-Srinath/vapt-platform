@@ -112,6 +112,21 @@ def build_prompts(session: Session, asset: models.Asset, *,
     return out
 
 
+def _stop(session: Session, run_row: models.AgentRun, rejected: list[dict[str, Any]],
+          boundary_fields: int, questions: int) -> models.AgentRun:
+    """End a run early, still recording what the boundary checked.
+
+    A disabled or failed run has usually already built and ENFORCED a payload;
+    recording that proves the outbound check ran even though nothing was sent.
+    """
+    run_row.rejected = rejected or None
+    run_row.boundary_report = {"checked_fields": boundary_fields, "questions": questions,
+                               "re_redacted_fields": 0}
+    run_row.finished_at = dt.datetime.now(dt.timezone.utc)
+    session.flush()
+    return run_row
+
+
 def run(session: Session, asset: models.Asset, *, actor_id: str | None) -> models.AgentRun:
     """One bounded pass: several focused requests, every answer validated.
 
@@ -154,17 +169,11 @@ def run(session: Session, asset: models.Asset, *, actor_id: str | None) -> model
             run_row.state = "disabled"
             run_row.error = (f"{exc}. The agent is advisory and off by default; enabling it "
                              "changes nothing about what the platform will execute.")
-            run_row.rejected = rejected or None
-            run_row.finished_at = dt.datetime.now(dt.timezone.utc)
-            session.flush()
-            return run_row
+            return _stop(session, run_row, rejected, boundary_fields, len(questions))
         except (client.LlmRefused, BoundaryRefusal) as exc:
             run_row.state = "failed"
             run_row.error = str(exc)
-            run_row.rejected = rejected or None
-            run_row.finished_at = dt.datetime.now(dt.timezone.utc)
-            session.flush()
-            return run_row
+            return _stop(session, run_row, rejected, boundary_fields, len(questions))
 
         sent += response.input_tokens
         received += response.output_tokens

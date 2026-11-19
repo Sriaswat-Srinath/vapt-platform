@@ -27,6 +27,38 @@ networks:
         - subnet: ${LAB_SUBNET:-172.30.10.0/24}
 
 services:
+  supplier-portal:
+    # MOCK-WEB-002 — a SECOND synthetic target, so the platform can be shown
+    # managing more than one application. Static nginx: there is no application
+    # behind it, only deliberately poor configuration for the passive rule
+    # packs to observe. Same containment as every other lab container: no
+    # `ports:` key, internal network only.
+    image: nginx@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+    container_name: vapt_supplier_portal
+    hostname: supplier-portal
+    restart: "no"
+    init: true
+    read_only: true
+    user: "101:101"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 128m
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=8m
+      - /var/cache/nginx:rw,nosuid,size=8m,uid=101,gid=101
+      - /var/run:rw,noexec,nosuid,size=4m,uid=101,gid=101
+    volumes:
+      - ./lab/supplier-portal/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./lab/supplier-portal/index.html:/usr/share/nginx/html/index.html:ro
+    networks:
+      vapt_lab:
+        ipv4_address: ${PORTAL_IP:-172.30.10.21}
+        aliases:
+          - ${MOCK_TARGET_2_HOSTNAME:-portal.brakes-vapt.test}
+
   juiceshop:
     # MOCK-WEB-001 — deliberately vulnerable synthetic training application.
     # Disposable. Contains no real data. Never reachable off-host.

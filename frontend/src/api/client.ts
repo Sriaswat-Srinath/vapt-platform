@@ -121,6 +121,26 @@ export interface AgentCapabilities {
   cannot: [string, string][]; note: string;
 }
 
+export interface ChatTurn {
+  id: string; role: "user" | "assistant"; content: string; citations: string[];
+  tool_calls: { tool: string; arguments: Record<string, unknown>; rows: number }[];
+  refusals: { tool: string; reason: string; detail: string }[];
+  rounds: number | null; model: string | null;
+  input_tokens: number | null; output_tokens: number | null;
+  error: string | null; created_at: string;
+}
+export interface Conversation {
+  id: string; asset_id: string; title: string | null; state: string;
+  input_tokens: number; output_tokens: number; created_at: string; updated_at: string;
+  turns: ChatTurn[];
+}
+export interface ChatCapabilities {
+  enabled: boolean; model: string | null; chat_version: string;
+  retrieval_version: string; max_tool_rounds: number;
+  conversation_token_budget: number;
+  tools: { name: string; description: string }[]; note: string;
+}
+
 export interface Report {
   id: string; title: string; state: string; generated_at: string | null;
   template_key: string; template_version: string; filter: { include_states?: string[] } | null;
@@ -206,6 +226,16 @@ export const api = {
       `/evidence/${id}/content`),
   reportTemplates: () =>
     call<{ key: string; version: string; sections: string[] }[]>("/report-templates"),
+  chatCapabilities: () => call<ChatCapabilities>("/chat/capabilities"),
+  conversations: (assetId: string) =>
+    call<Omit<Conversation, "turns">[]>(`/conversations?asset_id=${assetId}`),
+  conversation: (id: string) => call<Conversation>(`/conversations/${id}`),
+  startConversation: (assetId: string, title?: string) =>
+    call<Conversation>(`/assets/${assetId}/conversations`,
+      { method: "POST", body: JSON.stringify({ title: title ?? null }) }),
+  askQuestion: (conversationId: string, question: string) =>
+    call<ChatTurn>(`/conversations/${conversationId}/messages`,
+      { method: "POST", body: JSON.stringify({ question }) }),
   agentCapabilities: () => call<AgentCapabilities>("/agent/capabilities"),
   agentRuns: (assetId: string) => call<AgentRun[]>(`/assets/${assetId}/agent/runs`),
   startAgentRun: (assetId: string) =>

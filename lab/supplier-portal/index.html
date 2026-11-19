@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Supplier Portal (synthetic lab)</title>
+  <script src="https://cdn.example.test/portal-analytics.js"></script>
+</head>
+<body>
+  <h1>Supplier Portal</h1>
+  <p><strong>Synthetic lab application.</strong> No real data, no real supplier,
+     no connection to any production system.</p>
+
+  <form method="post" action="http://portal.brakes-vapt.test:8080/signin">
+    <label>User <input type="text" name="username"></label>
+    <label>Password <input type="password" name="password"></label>
+    <button type="submit">Sign in</button>
+  </form>
+
+  <ul>
+    <li><a href="/orders?orderId=1001&amp;quantity=1">Order 1001</a></li>
+    <li><a href="/redirect?next=http%3A%2F%2Fexample.test%2Fhelp">Help</a></li>
+    <li><a href="/api/suppliers">Supplier API</a></li>
+  </ul>
+  <!-- TODO: remove before go-live - internal build 4.17.1, contact ops -->
+</body>
+</html>

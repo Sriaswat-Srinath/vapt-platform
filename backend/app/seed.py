@@ -6,6 +6,7 @@ stays denied. Run: `python -m app.seed`.
 from __future__ import annotations
 import json
 import sys
+from typing import Any
 from sqlalchemy import select
 from . import audit, models, security, taxonomy
 from .catalogue import CATALOGUE
@@ -45,6 +46,55 @@ ACCOUNTS = [
     ("analyst@vapt.local", "Security Analyst", "analyst"),
     ("approver@vapt.local", "Assessment Approver", "approver"),
 ]
+
+
+
+# The lab's registered assets. Each has its OWN authorisation document: signing
+# one grants nothing for the other, which is the behaviour a multi-application
+# platform has to get right from the start rather than retrofit.
+LAB_ASSETS: list[dict[str, Any]] = [
+    dict(asset_identifier="MOCK-WEB-001",
+         display_name="OWASP Juice Shop (local synthetic lab)",
+         hostname="shop.brakes-vapt.test", port=3000,
+         notes=("Deliberately vulnerable synthetic training application. Disposable. "
+                "Contains no real data. Reachable only inside vapt_lab."),
+         rules=[("include", "/", ["GET", "HEAD", "POST"], "Registered mock target surface"),
+                ("exclude", "/rest/user/logout", [], "Session-destroying endpoint"),
+                ("exclude", "/api/Users", [], "User mutation endpoints are out of scope"),
+                ("exclude", "/rest/user/reset-password", [], "Credential-state mutation"),
+                ("exclude", "/ftp", [], "Static file retrieval loop; no assessment value")]),
+    dict(asset_identifier="MOCK-WEB-002",
+         display_name="Supplier Portal (local synthetic lab)",
+         hostname="portal.brakes-vapt.test", port=8080,
+         notes=("Static synthetic mock portal — three files served by nginx, configured the way "
+                "a hastily-deployed internal portal often is. No application behind it, no real "
+                "supplier, no real data. Reachable only inside vapt_lab."),
+         rules=[("include", "/", ["GET", "HEAD", "POST"], "Registered mock target surface"),
+                ("exclude", "/signin", [], "Credential submission endpoint"),
+                ("exclude", "/redirect", [], "Open-redirect surface; flagged, not exercised")]),
+]
+
+
+def _seed_assets(s) -> None:
+    """Register each lab asset once, with its scope rules. Idempotent."""
+    for spec in LAB_ASSETS:
+        row = s.execute(select(models.Asset).where(
+            models.Asset.asset_identifier == spec["asset_identifier"])).scalar_one_or_none()
+        if row is not None:
+            continue
+        row = models.Asset(
+            asset_identifier=spec["asset_identifier"], display_name=spec["display_name"],
+            hostname=spec["hostname"], protocol="http", port=spec["port"], base_path="/",
+            environment="mock_lab", criticality=1, state="active", notes=spec["notes"])
+        s.add(row)
+        s.flush()
+        audit.record(s, action="asset_seeded", actor_kind="system", actor_id="seed",
+                     outcome="ok", subject_type="asset", subject_id=str(row.id),
+                     detail={"asset_identifier": spec["asset_identifier"]})
+        for kind, path, methods, reason in spec["rules"]:
+            s.add(models.ScopeRule(asset_id=row.id, kind=kind, host_pattern=row.hostname,
+                                   port=row.port, path_prefix=path,
+                                   method_allowlist=methods, reason=reason))
 
 
 def main() -> int:
@@ -104,32 +154,7 @@ def main() -> int:
                     models.ScanProfile.key == spec["key"])).scalar_one_or_none() is None:
                 s.add(models.ScanProfile(**spec))
 
-        asset = s.execute(select(models.Asset).where(
-            models.Asset.asset_identifier == "MOCK-WEB-001")).scalar_one_or_none()
-        if asset is None:
-            asset = models.Asset(
-                asset_identifier="MOCK-WEB-001",
-                display_name="OWASP Juice Shop (local synthetic lab)",
-                hostname="shop.brakes-vapt.test", protocol="http", port=3000, base_path="/",
-                environment="mock_lab", criticality=1, state="active",
-                notes=("Deliberately vulnerable synthetic training application. Disposable. "
-                       "Contains no real data. Reachable only inside vapt_lab."))
-            s.add(asset)
-            s.flush()
-            audit.record(s, action="asset_seeded", actor_kind="system", actor_id="seed",
-                         outcome="ok", subject_type="asset", subject_id=str(asset.id),
-                         detail={"asset_identifier": "MOCK-WEB-001"})
-            rules = [
-                ("include", "/", ["GET", "HEAD", "POST"], "Registered mock target surface"),
-                ("exclude", "/rest/user/logout", [], "Session-destroying endpoint"),
-                ("exclude", "/api/Users", [], "User mutation endpoints are out of scope"),
-                ("exclude", "/rest/user/reset-password", [], "Credential-state mutation"),
-                ("exclude", "/ftp", [], "Static file retrieval loop; no assessment value"),
-            ]
-            for kind, path, methods, reason in rules:
-                s.add(models.ScopeRule(asset_id=asset.id, kind=kind,
-                                       host_pattern=asset.hostname, port=asset.port,
-                                       path_prefix=path, method_allowlist=methods, reason=reason))
+        _seed_assets(s)
         s.commit()
     finally:
         s.close()
@@ -138,8 +163,10 @@ def main() -> int:
                                    "categories": len(taxonomy.ALL),
                                    "tier1": len(taxonomy.TIER1)},
                       "catalogue_entries": len(CATALOGUE),
-                      "note": "No ScopeGrant created and no authorisation document signed: "
-                              "scanner execution remains denied."}, indent=2))
+                      "assets": [a["asset_identifier"] for a in LAB_ASSETS],
+                      "note": "No ScopeGrant created and no authorisation document signed for "
+                              "ANY asset: scanner execution remains denied. Authorisation is "
+                              "per asset."}, indent=2))
     return 0
 
 

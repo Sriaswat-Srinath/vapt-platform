@@ -65,7 +65,8 @@ const t=setTimeout(()=>done('UNRESOLVED'),5000);
 require('dns').lookup('$1',(e,a)=>{clearTimeout(t);done(e?'UNRESOLVED':'RESOLVED:'+a)});" 2>/dev/null || echo PROBE_ERROR; }
 # HTTP client inside the lab at an API-allowlisted IP (.30 = worker range).
 lab_client() { # $1 = url ; $2 = extra node code for status handling
-  docker run --rm --network "$LAB_NET" --ip "$LAB_CLIENT_IP" --entrypoint "$JS_NODE" \
+  docker run --rm --name "vapt_probe_$$" --network "$LAB_NET" --ip "$LAB_CLIENT_IP" \
+    --entrypoint "$JS_NODE" \
     "$JS_IMAGE" -e "
 const u=new URL('$1');
 require('http').get({host:u.hostname,port:u.port,path:u.pathname+u.search,timeout:8000},
@@ -103,8 +104,30 @@ fi
 r=$(zap_dns "$DNS_NAME");  add I4a UNRESOLVED "$r" "$(pass_fail "$r" UNRESOLVED)" "public dns from zap"
 r=$(js_dns "$DNS_NAME");   add I4b UNRESOLVED "$r" "$(pass_fail "$r" UNRESOLVED)" "public dns from juiceshop"
 
+# Additional lab TARGETS beyond the primary one. Enumerated from Docker rather
+# than hardcoded, so a container added to the lab cannot quietly escape these
+# checks — which is exactly how a new target becomes unverified surface.
+# The WORKER is excluded deliberately: it is the scanner driver, not a target.
+# It is legitimately dual-homed (core + lab) and legitimately holds the evidence
+# volume, and it is held to the NET-A / NET-G probes in scripts/net_verify.sh
+# instead. Everything else on the lab network is a target and is checked here.
+# Only `vapt_*` containers are platform components; this check's OWN transient
+# probe container (vapt_probe_*) is excluded, and so is anything that is not
+# ours — a foreign container on the lab network is reported by I12 below rather
+# than silently measured as if it were a target.
+EXTRA_TARGETS=$(docker ps --filter "network=${LAB_NET}" --format '{{.Names}}' 2>/dev/null \
+  | grep '^vapt_' | grep -v '^vapt_probe_' \
+  | grep -vx -e "$ZAP_C" -e "$JS_C" -e "${WORKER_C:-vapt_worker}" | tr '\n' ' ')
+FOREIGN_IN_LAB=$(docker ps --filter "network=${LAB_NET}" --format '{{.Names}}' 2>/dev/null \
+  | grep -v '^vapt_' | tr '\n' ' ')
+
+# I12: nothing that is not ours shares the lab network. A foreign container
+# there could reach the target, and would not be covered by any probe above.
+add I12 "<none>" "${FOREIGN_IN_LAB:-<none>}" "$([ -z "$FOREIGN_IN_LAB" ] && echo true || echo false)" \
+    "no non-platform container is attached to the lab network"
+
 # === I5 docker socket absent ================================================
-for c in "$ZAP_C" "$JS_C"; do
+for c in "$ZAP_C" "$JS_C" $EXTRA_TARGETS; do
   mounts=$(docker inspect "$c" --format '{{range .Mounts}}{{.Source}}->{{.Destination}} {{end}}' 2>/dev/null)
   sock=$(echo "$mounts" | grep -c 'docker.sock' || true)
   add "I5:$c" 0 "$sock" "$(pass_fail "$sock" 0)" "docker.sock binds in mounts: ${mounts:-<none>}"
@@ -123,9 +146,34 @@ add I6e ">0" "${pids:-0}" "$([ "${pids:-0}" -gt 0 ] && echo true || echo false)"
 add I6f ">0" "${mem:-0}" "$([ "${mem:-0}" -gt 0 ] && echo true || echo false)" "mem_limit bytes"
 
 # === I7 no host binds (evidence volume cannot be mounted into a scanner) ====
+# The SCANNER and the primary target must have no host binds at all: that is
+# what keeps the unredacted evidence volume out of a container that talks to
+# the target (ADR-0011).
 for c in "$ZAP_C" "$JS_C"; do
   binds=$(docker inspect "$c" --format '{{range .HostConfig.Binds}}{{.}} {{end}}' 2>/dev/null)
   add "I7:$c" "<none>" "${binds:-<none>}" "$([ -z "$binds" ] && echo true || echo false)" "host bind mounts"
+done
+# An additional static target may mount its OWN configuration read-only, and
+# nothing else. Every bind is checked individually: read-only, under the repo's
+# lab/ directory, and never a named volume (which is how the evidence store
+# would arrive).
+for c in $EXTRA_TARGETS; do
+  bad=0; seen=""
+  while read -r b; do
+    [ -z "$b" ] && continue
+    seen="$seen $b"
+    case "$b" in
+      */lab/*:*:ro) : ;;
+      *) bad=$((bad + 1));;
+    esac
+  done <<< "$(docker inspect "$c" --format '{{range .HostConfig.Binds}}{{println .}}{{end}}' 2>/dev/null)"
+  add "I7r:$c" 0 "$bad" "$(pass_fail "$bad" 0)" \
+      "additional target binds must be read-only config under lab/ (observed:${seen:-<none>})"
+  nets=$(docker inspect "$c" --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' 2>/dev/null | tr -d ' ')
+  add "I8f:$c" "$LAB_NET" "$nets" "$(pass_fail "$nets" "$LAB_NET")" \
+      "additional target attached to the internal lab network ONLY (not dual-homed)"
+  pub=$(docker inspect "$c" --format '{{json .NetworkSettings.Ports}}' 2>/dev/null | grep -c '0\.0\.0\.0' || true)
+  add "I8g:$c" 0 "$pub" "$(pass_fail "$pub" 0)" "additional target has no 0.0.0.0 publish"
 done
 
 # === I8 publishing: Juice Shop loopback-only; ZAP API not published =========

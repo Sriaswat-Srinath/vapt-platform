@@ -1,6 +1,7 @@
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api, getToken } from "./api/client";
+import { useSelectedAsset } from "./lib/useAsset";
 import { Boundary } from "./lib/ui";
 import SignIn from "./pages/SignIn";
 import Overview from "./pages/Overview";
@@ -10,9 +11,11 @@ import Assessments from "./pages/Assessments";
 import Findings from "./pages/Findings";
 import Coverage from "./pages/Coverage";
 import Analyst from "./pages/Analyst";
+import Chat from "./pages/Chat";
 import Reports from "./pages/Reports";
 
 const NAV = [
+  { to: "/chat", label: "Ask the analyst" },
   { to: "/overview", label: "Overview" },
   { to: "/assets", label: "Assets" },
   { to: "/scope", label: "Scope" },
@@ -26,6 +29,7 @@ const NAV = [
 export default function App() {
   const token = getToken();
   const caps = useQuery({ queryKey: ["caps"], queryFn: api.capabilities, enabled: !!token });
+  const { assets, asset, select } = useSelectedAsset();
 
   if (!token) return <SignIn />;
 
@@ -37,6 +41,22 @@ export default function App() {
           <strong>VAPT</strong>
           <span>platform</span>
         </div>
+        {assets.length > 0 && (
+          <div className="asset-switch">
+            <label htmlFor="asset">Application</label>
+            <select id="asset" value={asset?.id ?? ""}
+                    onChange={(e) => select(e.target.value)}>
+              {assets.map((a) => (
+                <option key={a.id} value={a.id}>{a.asset_identifier}</option>
+              ))}
+            </select>
+            {asset && (
+              <span className="sub">
+                {asset.hostname}:{asset.port} · {asset.environment}
+              </span>
+            )}
+          </div>
+        )}
         <nav>
           {NAV.map((n) => (
             <NavLink key={n.to} to={n.to} className={({ isActive }) => (isActive ? "active" : "")}>
@@ -71,7 +91,7 @@ export default function App() {
       <main>
         <Boundary>
         <Routes>
-          <Route path="/" element={<Navigate to="/overview" replace />} />
+          <Route path="/" element={<Navigate to="/chat" replace />} />
           <Route path="/overview" element={<Overview />} />
           <Route path="/assets" element={<Assets />} />
           <Route path="/scope" element={<Scope />} />
@@ -79,6 +99,7 @@ export default function App() {
           <Route path="/findings" element={<Findings />} />
           <Route path="/findings/:findingId" element={<Findings />} />
           <Route path="/coverage" element={<Coverage />} />
+          <Route path="/chat" element={<Chat />} />
           <Route path="/analyst" element={<Analyst />} />
           <Route path="/reports" element={<Reports />} />
         </Routes>

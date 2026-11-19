@@ -827,6 +827,46 @@ class AgentRun(Base):
     finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class Conversation(Base):
+    """One analyst conversation about ONE asset.
+
+    Handles (`f1` -> finding id) live here so they stay stable across turns and
+    survive a restart without a platform identifier ever being sent to a model.
+    Token counters are the cost control: a conversation has a budget.
+    """
+    __tablename__ = "conversations"
+    id: Mapped[Any] = _pk()
+    asset_id: Mapped[Any] = mapped_column(UUID(as_uuid=True), ForeignKey("assets.id"), nullable=False)
+    analyst_id: Mapped[Any] = mapped_column(UUID(as_uuid=True), ForeignKey("analysts.id"), nullable=False)
+    title: Mapped[str | None] = mapped_column(String(200))
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="open")
+    handles: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[dt.datetime] = _now()
+    updated_at: Mapped[dt.datetime] = _now()
+
+
+class ConversationTurn(Base):
+    """One turn. Tool calls and refusals are recorded alongside the text,
+    because what the model REACHED FOR is as interesting as what it said."""
+    __tablename__ = "conversation_turns"
+    id: Mapped[Any] = _pk()
+    conversation_id: Mapped[Any] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("conversations.id"), nullable=False)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)   # user | assistant
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    citations: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+    tool_calls: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
+    refusals: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
+    input_tokens: Mapped[int | None] = mapped_column(Integer)
+    output_tokens: Mapped[int | None] = mapped_column(Integer)
+    rounds: Mapped[int | None] = mapped_column(Integer)
+    model: Mapped[str | None] = mapped_column(String(80))
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[dt.datetime] = _now()
+
+
 class AgentProposal(Base):
     """An advisory proposal. Accepting one records a human's agreement and
     changes NO platform state: validation, severity, CVSS, scope and execution

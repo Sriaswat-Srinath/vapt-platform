@@ -73,6 +73,14 @@ class Settings(BaseSettings):
     # Never defaulted, never logged, never placed in a payload: it travels as an
     # SDK header. The stage-2 boundary refuses any payload containing it.
     anthropic_api_key: str | None = None
+    # ---- conversational analyst --------------------------------------------
+    # Cost controls, not safety controls: a chat loop that talks to a paid API
+    # needs a floor, and "it got expensive" should be a refusal, not a surprise.
+    llm_conversation_token_budget: int = 120_000
+    llm_daily_token_budget: int = 2_000_000
+    llm_history_turns: int = 12
+    llm_max_question_chars: int = 2000
+
     llm_max_findings: int = 25
     # How many findings get an explanation + remediation pair. Each is two
     # requests, so this is the main cost dial.

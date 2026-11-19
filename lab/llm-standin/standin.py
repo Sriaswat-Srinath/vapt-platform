@@ -130,6 +130,51 @@ def _answer(task: str, payload: dict) -> dict:
     return {"proposals": proposals}
 
 
+def _conversation_blocks(request: dict) -> tuple[list[dict], str]:
+    """Drive the conversational tool loop deterministically.
+
+    Round 1 (tools offered, no tool results yet): ask for findings.
+    Round 2 (tool results present): answer, citing handles that ACTUALLY came
+    back from the tool, so the platform's citation check is exercised honestly.
+    Misbehave mode cites a handle that was never supplied.
+    """
+    messages = request.get("messages", [])
+    results = []
+    for m in messages:
+        content = m.get("content")
+        if isinstance(content, list):
+            results += [c for c in content if isinstance(c, dict)
+                        and c.get("type") == "tool_result"]
+    if not results and request.get("tools"):
+        return ([{"type": "tool_use", "id": f"toolu_{uuid.uuid4().hex[:12]}",
+                  "name": "list_findings", "input": {"limit": 5}}], "tool_use")
+
+    handles = []
+    for r in results:
+        try:
+            payload = json.loads(r.get("content") or "{}")
+        except (ValueError, TypeError):
+            continue
+        for row in payload.get("findings", []) or []:
+            if row.get("handle"):
+                handles.append((row["handle"], row.get("title", "a finding"),
+                                row.get("validation_state", "")))
+    if MISBEHAVE:
+        text = ("The critical issue is f99, an unauthenticated admin panel at "
+                "/internal/console.jsp allowing full takeover.")
+    elif handles:
+        listed = "; ".join(f"{h} {t} ({st})" for h, t, st in handles[:4])
+        text = (f"{len(handles)} finding(s) were recorded for this application: {listed}. "
+                "These come from the stored assessment data; the validation state next to each "
+                "was set by a deterministic rule, not by me. Categories the build cannot assess "
+                "are listed separately in coverage, and their absence here is not evidence of "
+                "absence in the application.")
+    else:
+        text = ("No findings are recorded for this application yet. Running an assessment, or "
+                "checking coverage, would say more.")
+    return ([{"type": "text", "text": text}], "end_turn")
+
+
 def _messages_response(body: str) -> bytes:
     try:
         request = json.loads(body)
@@ -140,7 +185,22 @@ def _messages_response(body: str) -> bytes:
         payload = json.loads(content) if isinstance(content, str) else {}
     except ValueError:
         payload = {}
-    task = payload.get("task", "")
+    task = payload.get("task", "") if isinstance(payload, dict) else ""
+    # A conversational request carries tools or a tool result; a single-shot
+    # proposal request carries a `task`. They are answered differently.
+    conversational = bool(request.get("tools")) or any(
+        isinstance(m.get("content"), list) for m in request.get("messages", []))
+    if conversational and not task:
+        blocks, stop = _conversation_blocks(request)
+        doc = {"id": f"msg_{uuid.uuid4().hex[:16]}", "type": "message", "role": "assistant",
+               "model": request.get("model", MODEL_ECHO), "content": blocks,
+               "stop_reason": stop, "stop_sequence": None,
+               "usage": {"input_tokens": max(1, len(body) // 4),
+                         "output_tokens": max(1, len(json.dumps(blocks)) // 4)}}
+        out = json.dumps(doc).encode()
+        return (b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                b"Content-Length: " + str(len(out)).encode() +
+                b"\r\nConnection: close\r\n\r\n" + out)
     answer = _misbehave(task, payload) if MISBEHAVE else _answer(task, payload)
     doc = {
         "id": f"msg_{uuid.uuid4().hex[:16]}",

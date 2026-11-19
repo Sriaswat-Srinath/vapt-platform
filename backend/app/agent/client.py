@@ -181,5 +181,61 @@ def send(system: str, user_content: dict, *, timeout_s: float | None = None) -> 
         stop_reason=getattr(response, "stop_reason", None))
 
 
-__all__ = ["send", "LlmDisabled", "LlmRefused", "LlmResponse", "BoundaryRefusal",
-           "CLIENT_VERSION", "RESPONSE_SCHEMA"]
+@dc.dataclass(frozen=True, slots=True)
+class ConverseResponse:
+    """A multi-turn reply, with its content blocks intact so a tool loop can
+    replay them. The caller owns the loop (agent/chat.py)."""
+    blocks: list[dict[str, Any]]
+    input_tokens: int
+    output_tokens: int
+    model: str
+    stop_reason: str | None
+
+
+def converse(*, system: str, messages: list[dict[str, Any]],
+             tools: list[dict[str, Any]] | None = None) -> ConverseResponse:
+    """One turn of a conversation, optionally offering READ-ONLY tools.
+
+    The boundary has already seen the question and every tool result the caller
+    put into `messages`; this function does not re-walk the whole history on
+    each turn, because the only new material is what the caller just enforced.
+    """
+    s = settings()
+    if not s.llm_enabled:
+        raise LlmDisabled("LLM_ENABLED is false")
+    client = _build_client()
+    kwargs: dict[str, Any] = {
+        "model": s.llm_model,
+        "max_tokens": s.llm_max_output_tokens,
+        "system": system,
+        "messages": messages,
+    }
+    if tools:
+        kwargs["tools"] = tools
+    if s.llm_thinking_budget_tokens:
+        kwargs["thinking"] = {"type": "enabled",
+                              "budget_tokens": s.llm_thinking_budget_tokens}
+    try:
+        response = client.messages.create(**kwargs)
+    except Exception as exc:                                # noqa: BLE001
+        raise LlmRefused(f"{type(exc).__name__}: {exc}") from exc
+
+    blocks: list[dict[str, Any]] = []
+    for block in response.content:
+        kind = getattr(block, "type", None)
+        if kind == "text":
+            blocks.append({"type": "text", "text": block.text})
+        elif kind == "tool_use":
+            blocks.append({"type": "tool_use", "id": block.id, "name": block.name,
+                           "input": dict(block.input or {})})
+    usage = getattr(response, "usage", None)
+    return ConverseResponse(
+        blocks=blocks,
+        input_tokens=int(getattr(usage, "input_tokens", 0) or 0),
+        output_tokens=int(getattr(usage, "output_tokens", 0) or 0),
+        model=getattr(response, "model", s.llm_model),
+        stop_reason=getattr(response, "stop_reason", None))
+
+
+__all__ = ["send", "converse", "LlmDisabled", "LlmRefused", "LlmResponse",
+           "ConverseResponse", "BoundaryRefusal", "CLIENT_VERSION", "RESPONSE_SCHEMA"]
