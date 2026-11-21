@@ -139,6 +139,10 @@ services:
       APP_ENV: ${APP_ENV:-dev}
       SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set}
       EVIDENCE_BLOB_ROOT: /var/lib/vapt/evidence
+      # Evidence encryption at rest. OFF by default; the key is never stored in
+      # the database, so a database dump cannot read evidence.
+      EVIDENCE_ENCRYPTION_ENABLED: ${EVIDENCE_ENCRYPTION_ENABLED:-false}
+      EVIDENCE_ENCRYPTION_KEY: ${EVIDENCE_ENCRYPTION_KEY:-}
       # WeasyPrint's font stack wants a writable cache; the root filesystem is
       # read-only, so point it at the tmpfs.
       XDG_CACHE_HOME: /tmp
@@ -246,6 +250,10 @@ services:
       APP_ENV: ${APP_ENV:-dev}
       SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set}
       EVIDENCE_BLOB_ROOT: /var/lib/vapt/evidence
+      # Evidence encryption at rest. OFF by default; the key is never stored in
+      # the database, so a database dump cannot read evidence.
+      EVIDENCE_ENCRYPTION_ENABLED: ${EVIDENCE_ENCRYPTION_ENABLED:-false}
+      EVIDENCE_ENCRYPTION_KEY: ${EVIDENCE_ENCRYPTION_KEY:-}
       REDACTION_HMAC_KEY: ${REDACTION_HMAC_KEY:?REDACTION_HMAC_KEY must be set}
       REDACTION_KEY_ID: ${REDACTION_KEY_ID:-v1}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}

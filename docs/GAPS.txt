@@ -1,7 +1,7 @@
 ================================================================================
 VAPT PLATFORM — KNOWN GAPS
-Generated 2026-11-19 against commit 212ba29 (AI analyst transport on Haiku 4.5).
-Supersedes the 2026-11-19 edition written against cd44983.
+Generated 2026-11-21 against commit 53d8e00+ (buildable gaps closed).
+Supersedes the 2026-11-19 edition written against 212ba29.
 Every figure below was read from the running platform, not estimated.
 ================================================================================
 
@@ -12,15 +12,19 @@ HOW TO READ THIS
   a reader of a report must know they exist.
 
 WHAT CHANGED SINCE THE LAST EDITION
-  CLOSED   retention + invariant I12 · API rate limiting · CI, lint and types ·
-           fixtures for cryptographic failures and client-side · the Gate 2
-           decision (ADR-0015) · the AI analyst's real transport (it had never
-           spoken to anything but a stand-in) · gate 5 now VERIFIES the
-           authorisation document digest it always claimed to verify
-  NEW      three gaps that only appear once the agent can reach a provider
-           (§3.1-3.3), and the M9 readiness picture (§1.4)
-  UNMOVED  no live scan · five Tier-1 categories surface-only · business logic ·
-           all of Tier 2 · dual control · frontend tests · encryption at rest
+  CLOSED   conversational Q&A (§3.3) · multi-asset (§4.5) · agent cost controls
+           (§3.4) · EVIDENCE ENCRYPTION AT REST (§4.3) · frontend tests (§5.3) ·
+           sign-out and session hygiene (part of §4.7)
+  UNMOVED  no live scan · no real model has answered · the egress allowlist
+           decision · five Tier-1 categories surface-only · business logic ·
+           all of Tier 2 · dual control · no TLS in the app plane · no report
+           versioning
+
+  WHAT I CANNOT CLOSE, AND WHY — every remaining item in §1, §2.1 and §3.1-3.2
+  needs a person: a signature, a second approver, a service that belongs to
+  another project, an API key, or a decision about a security boundary. None of
+  them is an engineering gap, and simulating any of them would make the
+  platform's central claim false.
 
 
 --------------------------------------------------------------------------------
@@ -145,13 +149,16 @@ boundary 1.0.0, llm_enabled=false, no API key configured.
      which posture is in force), so the change does not weaken them — but it is
      yours to make, not mine.
 
-3.3  NO Q&A. The catalogue has six PROPOSAL tools and no free-form question
-     path, so "answer analyst questions" is not yet possible. Needs a tool, an
-     endpoint, a dashboard input and the same citation enforcement.
+3.3  (CLOSED) Conversational Q&A exists: seven READ-ONLY retrieval tools, a
+     bounded multi-turn loop, a chat screen, and citation enforcement — an
+     answer citing a handle it was never given is flagged. Every tool reads;
+     there is no tool that starts, stops or changes an assessment, so "could
+     the assistant act?" has a structural answer rather than a policy one.
 
-3.4  NO COST CONTROLS. No per-run token budget, no daily cap. A full run is
-     ~10k in / 1.5k out (about 1.8 cents on Haiku 4.5), so this is cheap to
-     ignore today and should exist before a real key does.
+3.4  (CLOSED) Cost controls: a per-run budget (60k tokens), a per-conversation
+     budget (120k) and a deployment-wide daily cap (2M). Exhaustion is a
+     RECORDED refusal, not a surprise. These are cost controls, not safety
+     controls, and are labelled that way.
 
 3.5  GROUNDEDNESS IS MEASURED CRUDELY. `agent_eval.py` catches invented paths,
      headers and parameters — the hallucination that matters most in a report —
@@ -179,23 +186,37 @@ boundary 1.0.0, llm_enabled=false, no API key configured.
      never means NO limit. It protects availability, not a boundary, and is not
      a defence against a distributed flood.
 
-4.3  Evidence is not encrypted at rest. Host full-disk encryption is assumed
-     and NOT verified by the platform (assumption B7).
+4.3  (CLOSED) Evidence IS encrypted at rest: AES-256-GCM, key from the
+     environment and never stored in the database, so a database dump cannot
+     read evidence. Content addressing is unchanged (the digest is of the
+     plaintext), each file says whether it is encrypted, and a store part-way
+     through migration stays readable — currently 12 encrypted and 235
+     plaintext blobs, all verified readable by `make evidence-rekey-check`.
+     A wrong key or an altered file fails loudly rather than returning
+     plausible bytes. OFF by default: an operator who loses the key has lost
+     their evidence, so enabling it is a deliberate decision.
+     Remaining: no re-key/rotation path — changing keys today means the old
+     blobs become unreadable, so rotation needs a decrypt-and-rewrite pass.
 
 4.4  Dual control cannot be satisfied with one operator. Two accounts held by
      one person are not independent approval, and the platform says so rather
      than simulating it. Every intrusive profile is therefore unreachable.
 
-4.5  ONE ASSET. Every screen operates on the first registered asset; there is
-     no asset switcher and no multi-asset coverage roll-up.
+4.5  (CLOSED for the MVP) TWO assets are registered, each with its OWN
+     unsigned authorisation document — signing one grants nothing for the
+     other. An asset switcher drives every screen from one shared selection,
+     and findings, coverage and conversations are scoped per asset.
+     Remaining: no cross-asset roll-up view, and no bulk operations.
 
 4.6  ONE SCANNER. Nuclei, authenticated scanning, EPSS/KEV enrichment, a
      platform priority score, multi-agent orchestration, a vector DB and
      Kubernetes remain deliberately deferred.
 
-4.7  AUTHENTICATION is a bearer token pasted into a form. No login flow, no
-     session renewal, no logout-everywhere, no token rotation UI. Tokens are
-     issued out of band by `make db-seed`.
+4.7  AUTHENTICATION is still a bearer token pasted into a form, issued out of
+     band by `make db-seed`. Sign-out now exists and clears both the token and
+     the remembered application, so a second analyst in the same tab inherits
+     neither. Still missing: a login flow, session renewal, token rotation in
+     the UI, and logout-everywhere.
 
 4.8  NO TLS anywhere in the application plane. The dashboard is reached over
      plain HTTP on a loopback-only forwarder, not a published port. (The agent's
@@ -218,9 +239,14 @@ boundary 1.0.0, llm_enabled=false, no API key configured.
 5.2  (CLOSED) Ruff and mypy are configured and clean across 75 source files,
      with mypy strict on the decision surfaces.
 
-5.3  NO FRONTEND TESTS. The dashboard is verified by running it and looking,
-     plus backend assertions about its headers, the auth-through-proxy
-     behaviour and the bundle contents. Eight screens, zero unit tests.
+5.3  (PARTLY CLOSED) The dashboard now has 11 unit tests (vitest +
+     testing-library) covering the journeys that carry meaning: the chat
+     screen's answer, tool and citation chips, what the assistant was REFUSED,
+     the disabled state, the asset switcher driving every screen (a real
+     regression — selection used to be per-component), and the coverage screen
+     showing its zeroes and what blocks each category. They run in CI.
+     Remaining: findings detail, report download, scope gate-denial rendering
+     and the assessment lifecycle are still only verified by running them.
 
 5.4  I12's two destructive cases are OPT-IN (`make test-retention`) and skip
      with instructions otherwise. The registry records this so it cannot be
@@ -294,23 +320,31 @@ Listed because they are easy to mistake for one:
 8. SUGGESTED ORDER OF WORK
 --------------------------------------------------------------------------------
 
-  1. M9 — the first genuine passive assessment (§1.4). It needs your signature
-     first, then a second person, then the listener resolved. Everything else
-     on this list is less valuable until real scanner output has been through
-     the pipeline once.
-  2. Point the agent at a real model (§3.1-3.2) — one decision, then
-     `make agent-eval` turns the question into a table.
-  3. Cost controls before a real key gets heavy use (§3.4).
-  4. Frontend tests (§5.3) — eight screens, zero coverage, cheapest remaining
-     assurance after CI.
-  5. Q&A for the agent (§3.3), which is the capability your brief named and the
-     platform does not yet have.
-  6. Everything in §2.1 stays blocked until there are two independent
-     approvers. That is not an engineering problem.
+  Everything buildable on the previous list has been built. What remains needs
+  a person:
+
+  1. M9 — the first genuine passive assessment (§1.4). Your signature, then a
+     second person, then the :5433 listener. Everything else is worth less
+     until real scanner output has been through the pipeline once.
+  2. Point the agent at a real model (§3.1-3.2) — an API key and one decision
+     about the egress allowlist, then `make agent-eval` turns the question
+     into a table. The harness is already proven to detect a bad model.
+  3. §2.1 stays blocked until there are two independent approvers.
+
+  Buildable, in the order I would take them, once the above is unblocked:
+
+  4. Evidence key rotation (§4.3) — a decrypt-and-rewrite pass, so a
+     compromised key is recoverable rather than terminal.
+  5. The remaining frontend journeys (§5.3): findings detail, report download,
+     gate-denial rendering.
+  6. Report versioning and diff (§4.9), which is what makes a second
+     assessment of the same asset legible.
 
 ================================================================================
-Verification at generation: backend + invariants 282 passed / 3 skipped;
-lab + network 118 passed; net_verify 118/118 probes; 14 of 14 invariants have
-implemented tests; lint and type checks clean. ZAP daemon clean. Authorisation
-document: unsigned draft, untouched since 83497ce.
+Verification at generation: backend + invariants 314 passed / 5 skipped;
+frontend 11 passed; lab + network 118 passed; net_verify 118/118 probes;
+14 of 14 invariants have implemented tests; lint and type checks clean.
+Evidence: AES-256-GCM at rest, 247 blobs verified readable.
+Authorisation documents: both unsigned drafts; MOCK-WEB-001 untouched since
+83497ce. Live assessments ever run: 0.
 ================================================================================

@@ -22,7 +22,10 @@ aside nav { display: flex; flex-direction: column; gap: 2px; }
 aside nav a { color: var(--text); text-decoration: none; padding: 7px 10px; border-radius: 6px; }
 aside nav a:hover { background: var(--panel-2); }
 aside nav a.active { background: var(--panel-2); box-shadow: inset 2px 0 0 var(--accent); }
-.posture { margin-top: auto; border-top: 1px solid var(--line); padding-top: 14px; }
+.signout { margin-top: auto; }
+.signout button { font-size: 12px; }
+
+.posture { border-top: 1px solid var(--line); padding-top: 14px; }
 .posture h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em;
   color: var(--dim); margin: 0 0 8px; }
 .posture dl { margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; font-size: 12px; }

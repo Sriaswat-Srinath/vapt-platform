@@ -40,6 +40,29 @@ function setSelected(id: string | null, persist: boolean) {
   listeners.forEach((l) => l());
 }
 
+/** Re-read the remembered selection from scratch.
+ *
+ *  Used on sign-out — a new analyst in the same tab must not inherit the
+ *  previous one's selected application — and by tests, which need the store to
+ *  start clean without reaching into a private. */
+export function resetAssetSelection(clearStorage = false) {
+  if (clearStorage) {
+    try {
+      sessionStorage.removeItem(KEY);
+    } catch {
+      /* nothing to clear */
+    }
+  }
+  selectedId = (() => {
+    try {
+      return sessionStorage.getItem(KEY);
+    } catch {
+      return null;
+    }
+  })();
+  listeners.forEach((l) => l());
+}
+
 export function useAssets() {
   return useQuery({ queryKey: ["assets"], queryFn: api.assets });
 }

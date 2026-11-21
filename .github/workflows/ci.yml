@@ -64,16 +64,19 @@ jobs:
             tests/backend/test_taxonomy_coverage.py \
             tests/backend/test_agent_phase6.py \
             tests/backend/test_phase8_hardening.py \
+            tests/backend/test_evidence_encryption.py \
+            tests/backend/test_chat_phase9.py \
             tests/backend/test_findings_phase5.py \
             tests/backend/test_discovery.py \
             -k "not api and not endpoint and not over_the_api" \
             --deselect tests/backend/test_findings_phase5.py::test_evidence_content_requires_justification_for_raw
 
-      - name: Frontend type check and build
+      - name: Frontend type check, tests and build
         run: |
           cd frontend
           npm ci
           npx tsc --noEmit
+          npm test
           npx vite build
 
   integration:

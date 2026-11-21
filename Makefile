@@ -101,6 +101,15 @@ api-up:                      ## build + start the real API (phase 2)
 	  [ "$$(docker inspect vapt_api --format '{{.State.Health.Status}}')" = healthy ] && { echo "api healthy"; exit 0; }; sleep 5; done; \
 	echo "api did not become healthy"; exit 1
 
+evidence-key:                ## generate an evidence-encryption key (printed ONCE)
+	@docker run --rm vapt-api:dev python -c \
+	  "from app.evidence.crypto import new_key_base64; print(new_key_base64())"
+	@echo "Store this in .env as EVIDENCE_ENCRYPTION_KEY and in your secret store."
+	@echo "Evidence written while encryption is on CANNOT be read without it."
+
+evidence-rekey-check:        ## verify every stored blob is readable with the current key
+	@./scripts/evidence_verify.py
+
 evidence-init:                ## one-off: give the non-root app user the evidence volume
 	@docker run --rm -v vapt_evidence:/d --user root --entrypoint sh vapt-api:dev \
 	  -c 'mkdir -p /d && chown -R 65532:65532 /d && chmod 700 /d && echo "evidence volume owned by 65532"'
@@ -182,6 +191,20 @@ detection-eval:              ## evaluate the engine against the detection datase
 	@./scripts/detection_eval.py --json .lab-state/detection-eval.json \
 	  --md docs/DETECTION_EVALUATION.md
 
+NODE_IMAGE := node@sha256:b2c8e0eb8a6aeeae33b2711f8f516003e27ee45804e270468d937b3214f2f0cc
+NPM := docker run --rm -v "$(CURDIR)/frontend":/app -w /app \
+	--user "$(shell id -u):$(shell id -g)" -e HOME=/tmp -e npm_config_cache=/tmp/.npm \
+	$(NODE_IMAGE)
+
+frontend-install:            ## install the dashboard's dev dependencies
+	@$(NPM) npm install --no-audit --no-fund
+
+test-frontend:               ## dashboard unit tests (vitest + testing-library)
+	@$(NPM) npm test
+
+frontend-typecheck:          ## tsc over the dashboard
+	@$(NPM) npx tsc --noEmit
+
 lint:                        ## ruff over backend, tests and scripts
 	@python3 -m ruff check .
 
@@ -194,7 +217,8 @@ format-check:                ## report formatting drift without rewriting anythi
 ci-local:                    ## what CI runs, locally: lint, types, invariants, code-only tests
 	@python3 -m ruff check . && python3 -m mypy && \
 	  python3 -m pytest backend/tests/invariants -q && \
-	  python3 -m pytest tests/backend/test_taxonomy_coverage.py -q -k "not api and not endpoint"
+	  python3 -m pytest tests/backend/test_taxonomy_coverage.py -q -k "not api and not endpoint" && \
+	  $(MAKE) --no-print-directory test-frontend
 
 test-retention:              ## I12: purge idempotence and halting, with real blobs
 	@# Turns RETENTION_ENABLED on for the run and off again afterwards. The

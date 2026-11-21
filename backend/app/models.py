@@ -667,6 +667,12 @@ class EvidenceBlob(Base):
     byte_size: Mapped[int] = mapped_column(Integer, nullable=False)
     media_type: Mapped[str | None] = mapped_column(String(120))
     storage_path: Mapped[str] = mapped_column(String(512), nullable=False)
+    # How this blob is stored: `none` or `aes-256-gcm`. Recorded per blob, not
+    # globally, because a store can legitimately contain both while encryption
+    # is being adopted — and the FILE is still the authority (it carries a
+    # magic header), so this column is reporting, never the decision.
+    encryption: Mapped[str] = mapped_column(String(20), nullable=False, default="none",
+                                            server_default="none")
     state: Mapped[str] = mapped_column(String(16), default="present", nullable=False,
                                        server_default="present")
     created_at: Mapped[dt.datetime] = _now()

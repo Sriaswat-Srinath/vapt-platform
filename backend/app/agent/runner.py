@@ -136,6 +136,10 @@ def run(session: Session, asset: models.Asset, *, actor_id: str | None) -> model
     """
     s = settings()
     questions = build_prompts(session, asset)
+    # The same cost control the conversational path has: an agent run that
+    # talks to a paid API needs a ceiling, and "it got expensive" should be a
+    # recorded refusal rather than a surprise on an invoice.
+    budget = s.llm_run_token_budget
 
     run_row = models.AgentRun(
         asset_id=asset.id, state="running", runner_version=RUNNER_VERSION,
@@ -151,6 +155,12 @@ def run(session: Session, asset: models.Asset, *, actor_id: str | None) -> model
     boundary_fields = 0
 
     for question in questions:
+        if sent + received >= budget:
+            rejected.append({"reason": "run budget exhausted", "tool": question.tool,
+                             "detail": (f"{sent + received} tokens used of the {budget} "
+                                        "per-run budget; the remaining questions were not "
+                                        "asked")})
+            break
         payload = prompts.as_request(question)
         try:
             checked, report = enforce(payload)

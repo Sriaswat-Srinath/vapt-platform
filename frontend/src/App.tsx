@@ -1,7 +1,7 @@
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { api, getToken } from "./api/client";
-import { useSelectedAsset } from "./lib/useAsset";
+import { api, getToken, setToken } from "./api/client";
+import { resetAssetSelection, useSelectedAsset } from "./lib/useAsset";
 import { Boundary } from "./lib/ui";
 import SignIn from "./pages/SignIn";
 import Overview from "./pages/Overview";
@@ -64,6 +64,15 @@ export default function App() {
             </NavLink>
           ))}
         </nav>
+        <div className="signout">
+          <button type="button" className="link" onClick={() => {
+            // Clear the token AND the remembered application: a different
+            // analyst signing in to the same tab must inherit neither.
+            setToken(null);
+            resetAssetSelection(true);
+            window.location.reload();
+          }}>Sign out</button>
+        </div>
         {c && (
           <div className="posture">
             <h3>Safety posture</h3>

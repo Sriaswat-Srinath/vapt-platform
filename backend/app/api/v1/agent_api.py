@@ -24,6 +24,8 @@ def capabilities(p: Principal = Depends(require_role("analyst", "approver", "adm
         "api_key_configured": bool(s.anthropic_api_key),
         "structured_output": s.llm_structured_output,
         "max_output_tokens": s.llm_max_output_tokens,
+        "run_token_budget": s.llm_run_token_budget,
+        "daily_token_budget": s.llm_daily_token_budget,
         "egress": "CONNECT-only allowlisting proxy; the api has no direct route out",
         "runner_version": runner.RUNNER_VERSION,
         "prompt_version": runner.PROMPT_VERSION,

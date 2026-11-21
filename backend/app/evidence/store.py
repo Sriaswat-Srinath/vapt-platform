@@ -3,6 +3,12 @@
 Writes are atomic (temp file + fsync + rename), mode 0600, under
 EVIDENCE_BLOB_ROOT. Deletion is reference-aware: a blob is never unlinked while
 any active evidence row references it (ADR-0011 R2 §7 / invariant I7).
+
+Blobs may be ENCRYPTED at rest (evidence/crypto.py). Content addressing is
+unchanged by that: `content_sha256` is always the digest of the PLAINTEXT, so
+deduplication, provenance and every stored reference keep working, and a store
+containing both encrypted and plaintext blobs stays readable because each file
+says which it is.
 """
 from __future__ import annotations
 import hashlib
@@ -13,6 +19,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from .. import models
+from . import crypto
 
 
 def root() -> pathlib.Path:
@@ -29,17 +36,27 @@ def path_for(digest: str) -> pathlib.Path:
 
 def put(session: Session, data: bytes, media_type: str | None = None) -> models.EvidenceBlob:
     """Store (or reuse) a blob. Content addressing deduplicates identical bodies."""
-    digest = sha256_bytes(data)
+    digest = sha256_bytes(data)                 # ALWAYS the plaintext digest
     existing = session.execute(select(models.EvidenceBlob).where(
         models.EvidenceBlob.content_sha256 == digest)).scalar_one_or_none()
     target = path_for(digest)
     if existing is not None and existing.state == "present" and target.exists():
         return existing
+
+    # Encrypt before anything touches the filesystem. If encryption was asked
+    # for and cannot be done, FAIL — never quietly write plaintext that the
+    # operator believes is encrypted.
+    encryption = crypto.PLAINTEXT
+    on_disk = data
+    if crypto.enabled():
+        on_disk = crypto.encrypt(data)
+        encryption = crypto.ALGORITHM
+
     target.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(target.parent), prefix=".blob.")
     try:
         with os.fdopen(fd, "wb") as f:
-            f.write(data)
+            f.write(on_disk)
             f.flush()
             os.fsync(f.fileno())
         os.chmod(tmp, 0o600)
@@ -57,19 +74,31 @@ def put(session: Session, data: bytes, media_type: str | None = None) -> models.
         existing.state = "present"
         existing.storage_path = str(target)
         existing.purged_at = None
+        existing.encryption = encryption
         return existing
+    # byte_size is the PLAINTEXT size: it is what a reader gets back, and what
+    # retention accounting should reason about.
     row = models.EvidenceBlob(content_sha256=digest, byte_size=len(data),
-                              media_type=media_type, storage_path=str(target), state="present")
+                              media_type=media_type, storage_path=str(target),
+                              state="present", encryption=encryption)
     session.add(row)
     session.flush()
     return row
 
 
 def read(blob: models.EvidenceBlob) -> bytes:
+    """Returns the PLAINTEXT, whatever is on disk.
+
+    The integrity check runs on the decrypted bytes, so it still means what it
+    always meant: these are the bytes that were stored. AES-GCM would already
+    have rejected a tampered ciphertext; this catches the other case, a
+    plaintext blob altered in place.
+    """
     p = pathlib.Path(blob.storage_path)
     if not p.exists():
         raise FileNotFoundError(f"blob {blob.content_sha256} is missing from {p}")
-    data = p.read_bytes()
+    raw = p.read_bytes()
+    data = crypto.decrypt(raw)
     if sha256_bytes(data) != blob.content_sha256:
         raise ValueError(f"blob {blob.content_sha256} failed its integrity check")
     return data

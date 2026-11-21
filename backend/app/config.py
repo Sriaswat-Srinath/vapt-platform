@@ -76,6 +76,7 @@ class Settings(BaseSettings):
     # ---- conversational analyst --------------------------------------------
     # Cost controls, not safety controls: a chat loop that talks to a paid API
     # needs a floor, and "it got expensive" should be a refusal, not a surprise.
+    llm_run_token_budget: int = 60_000
     llm_conversation_token_budget: int = 120_000
     llm_daily_token_budget: int = 2_000_000
     llm_history_turns: int = 12
@@ -92,6 +93,11 @@ class Settings(BaseSettings):
     # them. Disabled by default: deleting evidence is irreversible, so it is an
     # explicit operator decision, and the API's purge endpoint is dry-run
     # unless asked otherwise.
+    # Evidence encryption at rest. OFF by default: an operator who enables it
+    # and loses EVIDENCE_ENCRYPTION_KEY has lost their evidence, so it is a
+    # deliberate decision. Existing plaintext blobs stay readable either way.
+    evidence_encryption_enabled: bool = False
+
     retention_enabled: bool = False
     retention_evidence_blob_days: int = 90
     retention_batch_limit: int = 200

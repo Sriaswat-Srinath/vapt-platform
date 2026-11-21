@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 from ... import audit, errors, models, retention, schemas, services
+from ...evidence import crypto as evidence_crypto
 from ...config import settings
 from ...db import get_session
 from ...deps import Principal, require_role, trace_id
@@ -63,7 +64,7 @@ def capabilities(session: Session = Depends(get_session)) -> dict[str, object]:
                      if not effective else "Dual control available."),
         },
         "llm_enabled": s.llm_enabled,
-        "evidence_encryption": "none (host FDE assumed, unverified)",
+        "evidence_encryption": evidence_crypto.posture(),
         "environment_policy": "mock_lab only",
         "policy_version": __import__("app.safety.scope_policy", fromlist=["x"]).POLICY_VERSION,
     }
